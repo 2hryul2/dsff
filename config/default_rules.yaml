@@ -1,0 +1,31 @@
+# DS FolderFit — 기본 분류 규칙
+# 이 파일은 참조용입니다. 실제 기본 규칙은 rules/defaults.py에 정의됩니다.
+
+categories:
+  문서:
+    extensions: [.pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .txt, .rtf, .hwp, .hwpx, .md, .csv]
+    target_folder: Documents
+
+  이미지:
+    extensions: [.jpg, .jpeg, .png, .gif, .bmp, .svg, .webp, .ico, .psd]
+    target_folder: Images
+
+  동영상:
+    extensions: [.mp4, .avi, .mkv, .mov, .wmv, .flv, .webm]
+    target_folder: Videos
+
+  음악:
+    extensions: [.mp3, .wav, .flac, .aac, .ogg, .wma, .m4a]
+    target_folder: Music
+
+  압축:
+    extensions: [.zip, .rar, .7z, .tar, .gz, .bz2, .xz]
+    target_folder: Archives
+
+  설치파일:
+    extensions: [.exe, .msi, .dmg, .pkg, .deb, .rpm]
+    target_folder: Installers
+
+  코드:
+    extensions: [.py, .js, .ts, .java, .c, .cpp, .html, .css, .json, .xml, .yaml, .sql]
+    target_folder: Code

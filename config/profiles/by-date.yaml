@@ -1,0 +1,66 @@
+# ============================================================
+# DS FolderFit — 정리 프로필 #1: 날짜 기반 (Date-Based)
+# ============================================================
+# 추천 대상: 다운로드 폴더, 사진 폴더, 백업 폴더
+# 핵심 원리: 연도 › 월 구조로 시간 흐름에 따라 파일을 분류
+#
+# 폴더 구조 예시:
+#   2026/
+#   ├── 01-January/
+#   │   ├── report.pdf
+#   │   └── photo.jpg
+#   ├── 02-February/
+#   │   └── invoice.xlsx
+#   └── 03-March/
+#       └── meeting_notes.docx
+# ============================================================
+
+profile:
+  name: "날짜 기반"
+  id: "by-date"
+  description: "연도 > 월 구조로 시간 흐름이 중요한 파일에 최적"
+  rank: 1
+  best_for:
+    - "다운로드 폴더"
+    - "사진/동영상 폴더"
+    - "업무 산출물 백업"
+
+# 정리 방식 설정
+organize:
+  mode: "by-date"          # by-type | by-date | by-size
+  date_mode: "monthly"     # daily | monthly | yearly | age
+  date_source: "modified"  # created | modified (수정일 기준)
+
+# 생성일 접두사 리네임 — 날짜 기반 정렬에서 효과 극대화
+rename:
+  enabled: true
+  date_format: "YYYYMMDD"  # YYMMDD | YYYYMMDD | YYYY-MM-DD
+  date_source: "created"   # 만든 날짜 기준
+  skip_existing: true      # 이미 날짜 접두사 있으면 건너뛰기
+
+# 중복 파일 처리
+duplicates:
+  enabled: true
+  action: "move"           # report | move | trash | hardlink
+  hash_algorithm: "xxhash64"
+  verify_with_sha256: false
+
+# 감시 모드 — 다운로드 폴더에 새 파일 자동 정리
+watch:
+  enabled: true
+  delay: 3.0               # 다운로드 완료 대기 (초)
+  exclude_patterns:
+    - "*.tmp"
+    - "*.part"
+    - "*.crdownload"
+    - "desktop.ini"
+    - "Thumbs.db"
+
+# 폴더 분석 설정
+analyze:
+  large_file_threshold_mb: 500
+  old_file_days: 180       # 6개월 이상을 '오래된' 파일로 분류
+
+# 날짜 기반 모드에서는 별도 카테고리 분류 없이 날짜 폴더로만 이동
+# categories 섹션 생략 = defaults.py의 기본 규칙 적용 안 함
+categories: []

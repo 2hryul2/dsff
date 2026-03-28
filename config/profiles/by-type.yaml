@@ -1,0 +1,158 @@
+# ============================================================
+# DS FolderFit — 정리 프로필 #3: 파일 유형 기반 (Type-Based)
+# ============================================================
+# 추천 대상: 다운로드 폴더 정리 입문, 바탕화면 정리
+# 핵심 원리: 확장자·형식으로 단순하게 분류 — 처음 쓰는 분에게 친숙
+#
+# 폴더 구조 예시:
+#   Documents/      ← PDF, Word, Excel, PPT, HWP
+#   Images/         ← JPG, PNG, GIF, HEIC, PSD
+#   Videos/         ← MP4, MKV, AVI, MOV
+#   Music/          ← MP3, FLAC, WAV, AAC
+#   Archives/       ← ZIP, RAR, 7Z, TAR
+#   Installers/     ← EXE, MSI, DMG
+#   Code/           ← PY, JS, TS, HTML
+#   Fonts/          ← TTF, OTF, WOFF
+#   Others/         ← 분류 불가 파일
+# ============================================================
+
+profile:
+  name: "파일 유형 기반"
+  id: "by-type"
+  description: "확장자·형식으로 단순 분류, 입문자에게 친숙한 기본 방식"
+  rank: 3
+  best_for:
+    - "다운로드 폴더 정리 입문"
+    - "바탕화면 빠른 정리"
+    - "단순한 구조 선호"
+
+# 정리 방식 설정
+organize:
+  mode: "by-type"
+  date_mode: null
+
+# 생성일 접두사 리네임 — 유형 기반에서는 선택적
+rename:
+  enabled: false           # 기본 비활성 (--execute 시 별도 지정)
+  date_format: "YYMMDD"
+  date_source: "created"
+  skip_existing: true
+
+# 중복 파일 처리
+duplicates:
+  enabled: true
+  action: "trash"          # 파일 유형 정리 시 중복은 휴지통으로
+  hash_algorithm: "xxhash64"
+  verify_with_sha256: false
+
+# 감시 모드 — 다운로드 폴더에 적합
+watch:
+  enabled: true
+  delay: 2.0
+  exclude_patterns:
+    - "*.tmp"
+    - "*.part"
+    - "*.crdownload"
+    - "desktop.ini"
+    - "Thumbs.db"
+    - ".DS_Store"
+
+# 폴더 분석 설정
+analyze:
+  large_file_threshold_mb: 500
+  old_file_days: 365
+
+# ★ 파일 유형 기반 확장 분류 규칙
+# defaults.py보다 세분화된 매핑 + 추가 확장자 포함
+categories:
+
+  # ── 문서 ───────────────────────────────────────────────────
+  - name: "문서"
+    extensions:
+      [.pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx,
+       .hwp, .hwpx, .txt, .rtf, .odt, .ods, .odp,
+       .csv, .tsv, .md, .tex, .epub]
+    mime_types:
+      - "application/pdf"
+      - "application/msword"
+      - "application/vnd.openxmlformats-officedocument.*"
+      - "text/plain"
+      - "text/csv"
+    target_folder: "Documents"
+
+  # ── 이미지 ─────────────────────────────────────────────────
+  - name: "이미지"
+    extensions:
+      [.jpg, .jpeg, .png, .gif, .bmp, .svg, .webp,
+       .ico, .tiff, .tif, .heic, .heif,
+       .raw, .cr2, .nef, .dng, .psd, .ai, .eps]
+    mime_types: ["image/*"]
+    target_folder: "Images"
+
+  # ── 스크린샷 (이미지 하위 특수 분류) ─────────────────────────
+  - name: "스크린샷"
+    extensions: [.jpg, .jpeg, .png, .webp]
+    patterns:
+      - "Screenshot*"
+      - "스크린샷*"
+      - "캡처*"
+      - "Capture*"
+      - "screen*"
+    target_folder: "Images/Screenshots"
+
+  # ── 동영상 ─────────────────────────────────────────────────
+  - name: "동영상"
+    extensions:
+      [.mp4, .avi, .mkv, .mov, .wmv, .flv, .webm,
+       .m4v, .mpg, .mpeg, .3gp, .ts, .vob]
+    mime_types: ["video/*"]
+    target_folder: "Videos"
+
+  # ── 음악 ───────────────────────────────────────────────────
+  - name: "음악"
+    extensions:
+      [.mp3, .wav, .flac, .aac, .ogg, .wma, .m4a,
+       .opus, .aiff, .alac, .mid, .midi]
+    mime_types: ["audio/*"]
+    target_folder: "Music"
+
+  # ── 압축 ───────────────────────────────────────────────────
+  - name: "압축"
+    extensions:
+      [.zip, .rar, .7z, .tar, .gz, .bz2, .xz,
+       .tgz, .cab, .iso, .img]
+    mime_types:
+      - "application/zip"
+      - "application/x-rar-compressed"
+      - "application/x-7z-compressed"
+    target_folder: "Archives"
+
+  # ── 설치파일 ───────────────────────────────────────────────
+  - name: "설치파일"
+    extensions:
+      [.exe, .msi, .dmg, .pkg, .deb, .rpm, .appimage,
+       .apk, .ipa, .msix]
+    target_folder: "Installers"
+
+  # ── 코드·개발 ──────────────────────────────────────────────
+  - name: "코드"
+    extensions:
+      [.py, .js, .ts, .jsx, .tsx, .java, .c, .cpp, .h,
+       .cs, .go, .rs, .rb, .php, .swift, .kt, .sql,
+       .sh, .bat, .ps1, .html, .css, .scss,
+       .json, .xml, .yaml, .yml, .toml, .ini, .cfg, .ipynb]
+    mime_types: ["text/x-python", "application/javascript", "text/html"]
+    target_folder: "Code"
+
+  # ── 폰트 ───────────────────────────────────────────────────
+  - name: "폰트"
+    extensions: [.ttf, .otf, .woff, .woff2, .eot]
+    mime_types: ["font/*"]
+    target_folder: "Fonts"
+
+  # ── 데이터·DB ──────────────────────────────────────────────
+  - name: "데이터"
+    extensions:
+      [.db, .sqlite, .sqlite3, .mdb, .accdb,
+       .parquet, .feather, .arrow, .hdf5, .h5]
+    target_folder: "Data"
