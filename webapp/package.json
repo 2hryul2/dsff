@@ -39,7 +39,7 @@
       }
     ],
     "directories": {
-      "output": "../build/electron"
+      "output": "../dist"
     },
     "win": {
       "target": [
@@ -48,7 +48,7 @@
           "arch": ["x64"]
         }
       ],
-      "artifactName": "DSFolderFit-${version}-portable.exe"
+      "artifactName": "DSFolderFit-portable.exe"
     },
     "nsis": {
       "oneClick": false,

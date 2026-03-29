@@ -27,6 +27,14 @@ declare global {
       /* File system */
       readDir: (dirPath: string) => Promise<RawDirEntry[] | { error: string }>;
       openFolder: () => Promise<string | null>;
+      renameFile: (oldPath: string, newName: string) => Promise<DsffResult<{ newPath: string }>>;
+      copyFile: (srcPath: string) => Promise<DsffResult<{ destPath: string }>>;
+      moveToDeleteBin: (filePath: string, managedRoot: string) => Promise<DsffResult<{ dest: string }>>;
+      readDirRecursive: (dirPath: string) => Promise<DsffResult<Array<{ name: string; path: string; size: number; modified: string; created: string }>>>;
+      createFolders: (basePath: string, folderNames: string[]) => Promise<DsffResult<undefined>>;
+      findEmptyDirs:   (dirPath: string) => Promise<DsffResult<string[]>>;
+      removeEmptyDirs: (dirs: string[])  => Promise<DsffResult<{ removed: number; errors: string[] }>>;
+      undoMoves:       (ops: Array<{ source: string; dest: string }>) => Promise<DsffResult<{ restored: number; errors: string[] }>>;
 
       /* Config */
       loadConfig: () => Promise<ManagedFolder[]>;

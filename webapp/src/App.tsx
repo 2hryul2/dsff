@@ -12,6 +12,7 @@ import AnalyzeView from "./components/views/AnalyzeView";
 import PreviewView from "./components/views/PreviewView";
 import DuplicatesView from "./components/views/DuplicatesView";
 import RenameView from "./components/views/RenameView";
+import SmartOrganizeView from "./components/views/SmartOrganizeView";
 
 import {
   loadDirectory, parentDir,
@@ -100,6 +101,7 @@ export default function App() {
   const [tooltip, setTooltip]           = useState<TooltipState | null>(null);
   const [navWidth, setNavWidth]         = useState(220);
   const [detailOpen, setDetailOpen]     = useState(true);
+  const [refreshKey, setRefreshKey]     = useState(0);
 
   /* ── CLI data states ── */
   const [analyzeData, setAnalyzeData]     = useState<AnalysisData | null>(null);
@@ -143,6 +145,11 @@ export default function App() {
         setActiveFolder(first);
         setCurrentPath(first.path);
         fetchDir(first.path);
+        // watching 상태 복원
+        saved.filter((f) => f.watching).forEach((f) => {
+          window.electronAPI?.watchStart(f.path);
+        });
+        if (first.watching) setWatchActive(true);
       }
     });
   }, [fetchDir]);
@@ -155,8 +162,21 @@ export default function App() {
       setAnalyzeBusy(true);
       setAnalyzeError(null);
       window.electronAPI?.analyze(currentPath).then((res) => {
-        if (res.ok && res.data) setAnalyzeData(res.data);
-        else setAnalyzeError(res.error ?? "분석 실패");
+        if (res.ok && res.data) {
+          setAnalyzeData(res.data);
+          // 건강점수 + 분석 시간 업데이트
+          setFolders((prev) => {
+            const updated = prev.map((f) =>
+              f.path === currentPath
+                ? { ...f, score: res.data!.score, analyzedAt: new Date().toISOString() }
+                : f
+            );
+            window.electronAPI?.saveConfig(updated);
+            return updated;
+          });
+        } else {
+          setAnalyzeError(res.error ?? "분석 실패");
+        }
       }).catch((e) => setAnalyzeError(String(e))).finally(() => setAnalyzeBusy(false));
     }
 
@@ -301,13 +321,31 @@ export default function App() {
 
   async function handleWatchToggle() {
     if (!currentPath) return;
+    const managedRoot = activeFolder?.path ?? currentPath;
     if (watchActive) {
       await window.electronAPI?.watchStop(currentPath);
       setWatchActive(false);
+      setFolders((prev) => {
+        const updated = prev.map((f) =>
+          f.path === managedRoot ? { ...f, watching: false } : f
+        );
+        window.electronAPI?.saveConfig(updated);
+        return updated;
+      });
     } else {
       const res = await window.electronAPI?.watchStart(currentPath);
-      if (res?.ok) setWatchActive(true);
-      else setModal({ title: "감시 시작 실패", message: res?.error ?? "알 수 없는 오류" });
+      if (res?.ok) {
+        setWatchActive(true);
+        setFolders((prev) => {
+          const updated = prev.map((f) =>
+            f.path === managedRoot ? { ...f, watching: true } : f
+          );
+          window.electronAPI?.saveConfig(updated);
+          return updated;
+        });
+      } else {
+        setModal({ title: "감시 시작 실패", message: res?.error ?? "알 수 없는 오류" });
+      }
     }
   }
 
@@ -347,6 +385,15 @@ export default function App() {
   function goUp() {
     const parent = parentDir(currentPath);
     if (parent && parent !== currentPath) navigate(parent);
+  }
+
+  /* ── Rename a managed folder label ── */
+  function renameFolder(f: ManagedFolder, newLabel: string) {
+    const updated = folders.map((fld) =>
+      fld.path === f.path ? { ...fld, label: newLabel } : fld
+    );
+    setFolders(updated);
+    window.electronAPI?.saveConfig(updated);
   }
 
   /* ── Select a managed folder from nav pane ── */
@@ -481,9 +528,11 @@ export default function App() {
           folders={folders}
           active={activeFolder}
           width={navWidth}
+          refreshKey={refreshKey}
           onSelect={selectFolder}
           onAddFolder={addFolder}
           onRemoveFolder={removeFolder}
+          onRenameFolder={renameFolder}
           onNavigate={navigate}
         />
 
@@ -555,6 +604,14 @@ export default function App() {
             renameError ? <ErrorBanner message={renameError} onRetry={() => loadRenamePreview("YYYYMMDD", "created")} /> :
             renameData ? <RenameView plans={renameData} loading={renameBusy} onRefresh={loadRenamePreview} onExecute={handleRenameExecute} onCancel={() => handleSetView("explorer")} /> : null
           )}
+
+          {activeView === "smart" && activeFolder && (
+            <SmartOrganizeView
+              folder={activeFolder}
+              onCancel={() => handleSetView("explorer")}
+              onRefresh={() => { if (currentPath) fetchDir(currentPath); setRefreshKey((k) => k + 1); }}
+            />
+          )}
         </div>
 
         {/* Details Pane */}
@@ -563,6 +620,9 @@ export default function App() {
             file={selectedFile}
             folder={displayFolder}
             onClose={() => setDetailOpen(false)}
+            onSetView={handleSetView}
+            onToggleWatch={handleWatchToggle}
+            onRefresh={() => { if (currentPath) fetchDir(currentPath); setRefreshKey((k) => k + 1); }}
           />
         )}
         {(!detailOpen || !currentPath) && detailOpen && currentPath && null}
@@ -601,11 +661,13 @@ export default function App() {
           ]}
           onClose={() => setContextMenu(null)}
           onAction={(action) => {
-            if (action.startsWith("move-to:") && contextMenu.file) {
+            const file = contextMenu.file;
+            setContextMenu(null);
+            if (!file) return;
+
+            if (action.startsWith("move-to:")) {
               const targetFolder = action.slice("move-to:".length);
-              const sourcePath = contextMenu.file.path;
-              // Electron IPC로 파일 이동
-              window.electronAPI?.organizeCustom([{ source: sourcePath, destFolder: targetFolder }]).then((res) => {
+              window.electronAPI?.organizeCustom([{ source: file.path, destFolder: targetFolder }]).then((res) => {
                 if (res?.ok && res.data) {
                   const d = res.data as { moved: number; message: string };
                   setModal({ title: "파일 이동", message: d.message });
@@ -614,12 +676,38 @@ export default function App() {
                   setModal({ title: "이동 실패", message: res?.error ?? "알 수 없는 오류" });
                 }
               });
-            } else if (action === "open" && contextMenu.file) {
-              if (contextMenu.file.category === "folder") {
-                navigate(contextMenu.file.path);
+            } else if (action === "open") {
+              if (file.category === "folder") {
+                navigate(file.path);
               } else {
-                window.electronAPI?.openPath(contextMenu.file.path);
+                window.electronAPI?.openPath(file.path);
               }
+            } else if (action === "rename") {
+              setSelectedFile(file);
+              setDetailOpen(true);
+              // DetailsPane이 마운트된 후 이름 변경 모드를 트리거하기 위해
+              // DetailsPane 내부의 startRename은 파일 선택 후 사용자가 직접 클릭
+            } else if (action === "copy") {
+              window.electronAPI?.copyFile(file.path).then((res) => {
+                if (res?.ok) {
+                  if (currentPath) fetchDir(currentPath);
+                } else {
+                  setModal({ title: "복사 실패", message: res?.error ?? "알 수 없는 오류" });
+                }
+              });
+            } else if (action === "delete") {
+              const root = activeFolder?.path ?? currentPath;
+              window.electronAPI?.moveToDeleteBin(file.path, root).then((res) => {
+                if (res?.ok) {
+                  if (selectedFile?.path === file.path) setSelectedFile(null);
+                  if (currentPath) fetchDir(currentPath);
+                } else {
+                  setModal({ title: "삭제 실패", message: res?.error ?? "알 수 없는 오류" });
+                }
+              });
+            } else if (action === "properties") {
+              const parentPath = file.path.replace(/[\\/][^\\/]+$/, "") || file.path;
+              window.electronAPI?.openPath(parentPath);
             }
           }}
         />

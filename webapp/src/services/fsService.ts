@@ -27,6 +27,9 @@ const EXT: Record<string, ExtInfo> = {
   txt:  { category: "document", icon: "📄", type: "텍스트 파일" },
   md:   { category: "document", icon: "📄", type: "Markdown 파일" },
   hwp:  { category: "document", icon: "📝", type: "한글 문서" },
+  hwpx: { category: "document", icon: "📝", type: "한글 문서(OOXML)" },
+  csv:  { category: "document", icon: "📊", type: "CSV 파일" },
+  xlsb: { category: "document", icon: "📊", type: "Excel 바이너리 통합 문서" },
   /* Images */
   jpg:  { category: "image", icon: "🖼️", type: "JPG 이미지" },
   jpeg: { category: "image", icon: "🖼️", type: "JPEG 이미지" },
@@ -52,6 +55,8 @@ const EXT: Record<string, ExtInfo> = {
   "7z": { category: "archive", icon: "📦", type: "7Z 압축 파일" },
   tar:  { category: "archive", icon: "📦", type: "TAR 아카이브" },
   gz:   { category: "archive", icon: "📦", type: "GZ 압축 파일" },
+  vhdx: { category: "archive", icon: "💿", type: "가상 디스크 이미지" },
+  iso:  { category: "archive", icon: "💿", type: "디스크 이미지" },
   /* Code */
   js:   { category: "code", icon: "💻", type: "JavaScript 파일" },
   ts:   { category: "code", icon: "💻", type: "TypeScript 파일" },
@@ -72,6 +77,11 @@ const EXT: Record<string, ExtInfo> = {
   sh:   { category: "code", icon: "💻", type: "Shell 스크립트" },
   bat:  { category: "code", icon: "💻", type: "배치 파일" },
   ps1:  { category: "code", icon: "💻", type: "PowerShell 스크립트" },
+  sql:  { category: "code", icon: "💻", type: "SQL 파일" },
+  env:  { category: "code", icon: "⚙️", type: "환경 설정 파일" },
+  /* Fonts */
+  ttf:  { category: "other", icon: "🔤", type: "TrueType 폰트" },
+  otf:  { category: "other", icon: "🔤", type: "OpenType 폰트" },
 };
 
 /* ── Formatters ── */

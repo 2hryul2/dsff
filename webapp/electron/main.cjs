@@ -156,6 +156,139 @@ ipcMain.on("window-close", () => win && win.close());
 /* ── Open path in OS Explorer ── */
 ipcMain.handle("open-path", (_e, p) => shell.openPath(p));
 
+/* ── Read directory recursively (all files, no subdirs) ── */
+ipcMain.handle("fs:readDirRecursive", async (_e, dirPath) => {
+  const results = [];
+  const SKIP = new Set(["node_modules", "__pycache__", ".git", "삭제대상"]);
+  function walk(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIP.has(entry.name)) walk(full);
+      } else {
+        try {
+          const st = fs.statSync(full);
+          results.push({
+            name: entry.name,
+            path: full,
+            size: st.size,
+            modified: st.mtime.toISOString(),
+            created: st.birthtime.toISOString(),
+          });
+        } catch { /* skip */ }
+      }
+    }
+  }
+  walk(dirPath);
+  return { ok: true, data: results };
+});
+
+/* ── Create folder structure under basePath ── */
+ipcMain.handle("fs:createFolders", async (_e, basePath, folderNames) => {
+  try {
+    for (const name of folderNames) {
+      const target = path.join(basePath, name);
+      if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* ── Rename file/folder ── */
+ipcMain.handle("fs:renameFile", async (_e, oldPath, newName) => {
+  try {
+    const newPath = path.join(path.dirname(oldPath), newName);
+    fs.renameSync(oldPath, newPath);
+    return { ok: true, data: { newPath } };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* ── Copy file/folder (same dir, "_복사본" suffix) ── */
+ipcMain.handle("fs:copy", async (_e, srcPath) => {
+  try {
+    const dir = path.dirname(srcPath);
+    const ext = path.extname(srcPath);
+    const base = path.basename(srcPath, ext);
+    const destPath = path.join(dir, `${base}_복사본${ext}`);
+    fs.cpSync(srcPath, destPath, { recursive: true });
+    return { ok: true, data: { destPath } };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* ── Move to "삭제대상" folder inside managed root ── */
+ipcMain.handle("fs:moveToDeleteBin", async (_e, filePath, managedRoot) => {
+  try {
+    const binDir = path.join(managedRoot, "삭제대상");
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+    let dest = path.join(binDir, path.basename(filePath));
+    // 같은 이름 충돌 방지: 타임스탬프 접미사 추가
+    if (fs.existsSync(dest)) {
+      const ext = path.extname(filePath);
+      const base = path.basename(filePath, ext);
+      dest = path.join(binDir, `${base}_${Date.now()}${ext}`);
+    }
+    fs.renameSync(filePath, dest);
+    return { ok: true, data: { dest } };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* ── 빈 폴더 탐색 ── */
+ipcMain.handle("fs:findEmptyDirs", async (_e, dirPath) => {
+  try {
+    const SKIP = new Set(["삭제대상", "node_modules", "__pycache__", ".git"]);
+    const emptyDirs = [];
+    function hasFiles(dir) {
+      try {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
+          if (!entry.isDirectory()) return true;
+          if (hasFiles(path.join(dir, entry.name))) return true;
+        }
+      } catch { /* 접근 불가 디렉토리 무시 */ }
+      return false;
+    }
+    function walk(dir) {
+      try {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (!entry.isDirectory() || entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
+          const full = path.join(dir, entry.name);
+          if (!hasFiles(full)) emptyDirs.push(full);
+          else walk(full);
+        }
+      } catch { /* 접근 불가 디렉토리 무시 */ }
+    }
+    walk(dirPath);
+    return { ok: true, data: emptyDirs };
+  } catch (err) { return { ok: false, error: String(err) }; }
+});
+
+/* ── 빈 폴더 삭제 ── */
+ipcMain.handle("fs:removeEmptyDirs", async (_e, dirs) => {
+  let removed = 0;
+  const errors = [];
+  for (const dir of dirs) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed++;
+    } catch (err) {
+      errors.push(`${path.basename(dir)}: ${err.message}`);
+    }
+  }
+  return { ok: true, data: { removed, errors } };
+});
+
 /* ── Read directory entries ── */
 ipcMain.handle("fs:readDir", (_e, dirPath) => {
   try {
@@ -317,8 +450,28 @@ ipcMain.handle("dsff:organizeCustom", async (_e, moves) => {
       message: failed > 0
         ? `${moved}개 파일 이동 완료, ${failed}개 실패`
         : `${moved}개 파일 정리 완료`,
+      errors,
+      ops,
     },
   };
+});
+
+/* ── Undo custom moves: reverse ops ── */
+ipcMain.handle("fs:undoMoves", async (_e, ops) => {
+  let restored = 0;
+  const errors = [];
+  for (let i = ops.length - 1; i >= 0; i--) {
+    const { source, dest } = ops[i];
+    try {
+      const origDir = path.dirname(source);
+      if (!fs.existsSync(origDir)) fs.mkdirSync(origDir, { recursive: true });
+      fs.renameSync(dest, source);
+      restored++;
+    } catch (err) {
+      errors.push(`${path.basename(dest)}: ${err.message}`);
+    }
+  }
+  return { ok: true, data: { restored, errors } };
 });
 
 ipcMain.handle("dsff:watchStart", async (_e, targetPath) => {

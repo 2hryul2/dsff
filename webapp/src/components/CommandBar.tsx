@@ -102,9 +102,10 @@ export default function CommandBar({ activeView, watchActive, onSetView, onOrgan
         )}
       </div>
 
-      <CmdBtn icon="📊" label="분석"    active={activeView === "analyze"}    onClick={() => onSetView(activeView === "analyze"    ? "explorer" : "analyze")} />
-      <CmdBtn icon="✏️"  label="리네임"  active={activeView === "rename"}     onClick={() => onSetView(activeView === "rename"     ? "explorer" : "rename")} />
-      <CmdBtn icon="🔍" label="중복검사" active={activeView === "duplicates"} onClick={() => onSetView(activeView === "duplicates" ? "explorer" : "duplicates")} />
+      <CmdBtn icon="✨" label="스마트 정리" active={activeView === "smart"}      onClick={() => onSetView(activeView === "smart"      ? "explorer" : "smart")} />
+      <CmdBtn icon="📊" label="분석"       active={activeView === "analyze"}    onClick={() => onSetView(activeView === "analyze"    ? "explorer" : "analyze")} />
+      <CmdBtn icon="✏️"  label="리네임"    active={activeView === "rename"}     onClick={() => onSetView(activeView === "rename"     ? "explorer" : "rename")} />
+      <CmdBtn icon="🔍" label="중복검사"   active={activeView === "duplicates"} onClick={() => onSetView(activeView === "duplicates" ? "explorer" : "duplicates")} />
 
       {/* Separator */}
       <div style={{ width: 1, height: 22, background: "#ddd", margin: "0 4px" }} />

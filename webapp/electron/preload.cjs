@@ -15,8 +15,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openPath: (p) => ipcRenderer.invoke("open-path", p),
 
   /* File system */
-  readDir:    (dirPath) => ipcRenderer.invoke("fs:readDir", dirPath),
-  openFolder: ()        => ipcRenderer.invoke("dialog:openFolder"),
+  readDir:    (dirPath)          => ipcRenderer.invoke("fs:readDir", dirPath),
+  openFolder: ()                 => ipcRenderer.invoke("dialog:openFolder"),
+  renameFile:       (oldPath, newName)       => ipcRenderer.invoke("fs:renameFile", oldPath, newName),
+  copyFile:         (srcPath)                => ipcRenderer.invoke("fs:copy", srcPath),
+  moveToDeleteBin:  (filePath, managedRoot)  => ipcRenderer.invoke("fs:moveToDeleteBin", filePath, managedRoot),
+  readDirRecursive: (dirPath)                => ipcRenderer.invoke("fs:readDirRecursive", dirPath),
+  createFolders:    (basePath, folderNames)  => ipcRenderer.invoke("fs:createFolders", basePath, folderNames),
+  findEmptyDirs:    (dirPath)               => ipcRenderer.invoke("fs:findEmptyDirs", dirPath),
+  removeEmptyDirs:  (dirs)                  => ipcRenderer.invoke("fs:removeEmptyDirs", dirs),
+  undoMoves:        (ops)                   => ipcRenderer.invoke("fs:undoMoves", ops),
 
   /* Managed-folders config */
   loadConfig: ()       => ipcRenderer.invoke("config:load"),

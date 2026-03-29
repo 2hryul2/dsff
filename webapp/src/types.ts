@@ -1,4 +1,4 @@
-export type ActiveView = "explorer" | "analyze" | "preview" | "duplicates" | "rename";
+export type ActiveView = "explorer" | "analyze" | "preview" | "duplicates" | "rename" | "smart";
 
 export interface FileItem {
   name: string;
@@ -19,6 +19,16 @@ export interface ManagedFolder {
   score: number;
   watching: boolean;
   profile?: string;
+  analyzedAt?: string;  // ISO 날짜 문자열
+}
+
+export interface SmartOrganizeFilePlan {
+  srcPath: string;
+  fileName: string;
+  ext: string;
+  destFolder: string;   // 관리폴더 기준 상대 경로
+  reason: string;       // 분류 근거 설명
+  skip: boolean;
 }
 
 export interface CategoryStat {
@@ -98,6 +108,8 @@ export interface OrganizeResult {
   moved: number;
   failed: number;
   message: string;
+  errors?: string[];
+  ops?: Array<{ source: string; dest: string }>;
 }
 
 export interface RenameResult {
