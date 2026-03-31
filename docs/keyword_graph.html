@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>DS FolderFit — 직군별 분류 키워드 연관 그래프</title>
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; background: #0f172a; color: #e2e8f0; }
+#header { padding: 16px 24px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }
+#header h1 { font-size: 18px; font-weight: 700; }
+#header .subtitle { font-size: 12px; color: #94a3b8; }
+#controls { padding: 10px 24px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.chip { padding: 4px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; border: 2px solid; transition: all 0.2s; user-select: none; }
+.chip.active { color: #fff; }
+.chip.inactive { opacity: 0.35; }
+#graph { width: 100%; height: calc(100vh - 130px); }
+#info { position: fixed; bottom: 16px; right: 16px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; max-width: 350px; max-height: 300px; overflow-y: auto; font-size: 12px; display: none; z-index: 10; }
+#info h3 { font-size: 14px; margin-bottom: 6px; }
+#info .kw-list { color: #94a3b8; line-height: 1.8; }
+#info .kw-list span { background: #334155; padding: 1px 6px; border-radius: 3px; margin: 1px; display: inline-block; }
+#stats { font-size: 11px; color: #64748b; display: flex; gap: 16px; }
+#legend { position: fixed; top: 90px; left: 16px; background: #1e293bdd; border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; font-size: 11px; z-index: 10; }
+#legend div { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+#legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+</head>
+<body>
+<div id="header">
+  <div>
+    <h1>DS FolderFit — 직군별 분류 키워드 연관 그래프</h1>
+    <div class="subtitle">노드를 클릭하면 상세 키워드를 확인할 수 있습니다. 직군 칩을 클릭하여 필터링하세요.</div>
+  </div>
+  <div id="stats"></div>
+</div>
+<div id="controls"></div>
+<div id="graph"></div>
+<div id="info"></div>
+<div id="legend">
+  <div style="font-weight:600;margin-bottom:4px;">범례</div>
+  <div><span class="dot" style="background:#fff;width:14px;height:14px;"></span> 직군 (중심 노드)</div>
+  <div><span class="dot" style="background:#475569;"></span> 폴더 (중간 노드)</div>
+  <div><span class="dot" style="background:#64748b;width:6px;height:6px;"></span> 키워드 (말단 노드)</div>
+  <div style="margin-top:6px;color:#f59e0b;">━ 공유 키워드 연결선 (주황)</div>
+</div>
+
+<script>
+const DATA = {"jobs": {"EXECUTIVE": {"label": "임원·관리자", "color": "#ef4444", "folders": {"월간보고": ["bsc", "dashboard", "kpi", "monthly", "performance", "quarterly", "revenue", "경영실적", "경영지표", "당기순이익", "대시보드", "매출", "반기", "분기보고", "분기실적", "사업성과", "사업실적", "사업현황", "상반기", "실적", "연간실적", "영업이익", "월간보고", "하반기", "핵심지표"], "임원회의": ["agenda", "ceo", "cfo", "ciso", "coo", "cto", "forum", "seminar", "workshop", "경영전략", "경영진", "경영회의", "보고안건", "본부장", "부사장", "상무", "세미나", "안건", "워크숍", "의결안건", "이사회", "이사회안건", "임원보고", "임원회의", "전략회의", "전무", "컨퍼런스", "포럼", "회의자료"], "21_M&A검토": ["duediligence", "m&a", "ma검토", "valuation", "가치평가", "기업인수", "매각", "시너지", "실사", "인수", "인수합병", "피인수", "합병"], "22_신사업계획": ["3개년", "5개년", "budget", "ip", "marketanalysis", "patent", "risk", "roadmap", "roi", "swot", "경쟁분석", "계열사", "관계사", "그룹사", "기밀", "기술이전", "라이센싱", "로드맵", "리스크", "배당", "벤치마크", "사업계획서", "사업보고서", "사업비", "시장분석", "신사업", "예산", "자회사", "전략", "주주", "중장기", "지분", "지적재산", "지주회사", "출자", "투자", "투자심의", "특허"], "31_고객사": ["client", "cs", "delivery", "sla", "거래처", "고객", "고객만족", "고객사", "납기", "발주처", "서비스수준", "원청"], "32_협력사": ["supplier", "vendor", "공급업체", "벤더평가", "아웃소싱", "업체관리", "외주", "파트너", "하청", "협력사", "협력업체"], "33_금융·법률": ["compliance", "lawsuit", "감독원", "감사보고", "고용부", "공공기관", "공정위", "관공서", "관세청", "국세청", "규제", "금감원", "금융", "내부감사", "노동부", "법률", "법률의견", "법무", "분쟁", "세무", "소송", "외부감사", "자문", "정부", "조정", "중재", "컴플라이언스"], "40_인사_조직": ["결재규정", "규정", "규칙", "근무규정", "내규", "복무", "복무규정", "부서신설", "부서통합", "사규", "위임전결", "윤리규정", "이사회규정", "인사", "인사규정", "정관", "정원", "조직", "조직개편", "조직변경", "지침", "직제", "취업규칙", "행동강령"], "90_Archive": ["archive", "보관", "아카이브", "정리", "종결"], "01_수신함": ["fyi", "memo", "notice", "고시", "공문", "공유", "공지", "메모", "시달", "안내문", "전달사항", "참고", "통보", "회람"], "주간보고": ["daily", "report", "weekly", "보고", "부서보고", "업무보고", "업무일지", "일일보고", "주간보고", "주보", "팀보고"]}}, "DEVELOPER": {"label": "개발자", "color": "#3b82f6", "folders": {"월간보고": ["monthly", "quarterly", "반기보고", "분기보고", "월간보고"], "임원회의": ["cto", "경영진", "본부장", "임원"], "32_테스트케이스": ["automationtest", "junit", "pytest", "regression", "sanity", "selenium", "smoketest", "tc-_", "testcase", "testscenario", "검증항목", "셀레니움", "자동화테스트", "테스트시나리오", "테스트케이스", "테스트항목", "회귀테스트"], "33_결함관리": ["bug-_", "buglist", "bugtracking", "defect", "defectlist", "errorreport", "issuelist", "결함", "결함목록", "결함분석", "결함추적", "결함통계", "버그", "오류", "이슈목록"], "34_증적": ["codequality", "evidence", "injection", "lint", "owasp", "penetration", "pentest", "screenshot", "securecoding", "sonar", "xss", "모의해킹", "보안취약점", "스크린샷", "시큐어코딩", "정적분석", "증적", "취약점점검", "캡처", "코드품질", "화면캡처"], "31_테스트계획": ["integrationtest", "loadtest", "stresstest", "testenv", "testplan", "teststrategy", "uat", "unittest", "단위테스트", "부하테스트", "사용자테스트", "성능테스트", "스트레스테스트", "인수테스트", "테스트계획", "테스트전략", "테스트환경", "통합테스트"], "35_결과보고서": ["coverage", "qa보고", "qualityreport", "testresult", "결과보고", "커버리지", "테스트결과", "품질보고", "품질분석"], "21_요구사항": ["bpmn", "functionalspec", "iss-_", "nonfunctional", "rtm", "srs", "traceability", "usecase", "userstory", "기능명세", "비기능", "사용자스토리", "업무흐름", "요구명세", "요구분석", "요구사항", "유스케이스", "추적표", "트레이서빌리티", "프로세스정의"], "22_아키텍처": ["apispec", "api명세", "api설계", "apm", "architecture", "auth", "baseline", "batch", "caching", "classdiagram", "component", "db설계", "ddl", "deploydiagram", "dml", "encryption", "erd", "etl", "flowchart", "framework", "git", "interface", "kafka", "logging", "microservice", "migration", "namingconvention", "queue", "rabbitmq", "rbac", "scheduler", "schema", "sequence", "svn", "techstack", "개발표준", "기술스택", "네트워크구성", "다이어그램", "데이터전환", "데이터파이프라인", "라이브러리선정", "로그설계", "마이그레이션", "마이크로서비스", "메시징", "모니터링설계", "모듈설계", "배치설계", "배포구성", "보안설계", "성능설계", "스케줄러", "스키마", "시스템구성도", "시퀀스", "아키텍처", "알림설계", "암호화", "연동규격", "연동명세", "연동설계", "이행", "이행계획", "이행절차", "인증설계", "인터페이스", "인프라설계", "접근제어", "캐싱", "컴포넌트설계", "코딩표준", "클래스설계", "테이블명세", "테이블설계", "프레임워크", "형상관리", "형상변경"], "23_화면설계": ["accessibility", "designguide", "gui", "mockup", "prototype", "responsive", "styleguide", "ui", "ux", "wcag", "wireframe", "디자인가이드", "반응형", "스타일가이드", "스토리보드", "접근성", "화면설계", "화면정의"], "24_회의록": ["dailyscrum", "designreview", "lessonslearned", "meeting", "retro", "retrospective", "review", "standup", "검수회의", "기술검토", "데일리", "리뷰", "미팅", "설계리뷰", "스탠드업", "아키텍처리뷰", "코드리뷰", "피드백", "회고", "회의록", "회의메모"], "11_착수": ["estimation", "kickoff", "manmonth", "mm", "projectcharter", "raci", "resourceplan", "sow", "견적산출", "공수", "단가", "맨먼스", "범위정의", "비용산정", "역할분담", "원가산정", "인력배치", "착수", "착수보고", "투입계획", "프로젝트헌장"], "12_일정·이슈": ["backlog", "changerequest", "cr-_", "decisionlog", "gantt", "issue", "jira", "kanban", "milestone", "progress", "riskmanagement", "sprint", "wbs", "간트", "리스크관리", "마일스톤", "백로그", "변경대장", "변경요청", "변경이력", "스프린트", "의사결정", "이슈", "이슈관리", "이슈대장", "일정", "지라", "진척률", "진행률", "칸반"], "14_감리_감사대응": ["감리", "감리대응", "감리지적", "감리체크", "감사", "내부통제", "법적요건", "법정감사", "시정조치", "준수확인"], "13_고객사통신": ["고객검토", "고객사", "고객사통신", "고객승인", "고객요청", "고객피드백", "고객확인", "요청사항", "질의응답", "협의사항"], "42_인수인계": ["handover", "담당이관", "업무이관", "인수인계"], "43_유지보수": ["maintenance", "sla", "warranty", "보증기간", "운영계획", "운영이관", "유지보수", "하자기간", "하자보수"], "41_최종산출물": ["adminmanual", "checklist", "closeout", "deploy", "release", "usermanual", "교육자료", "납품", "릴리즈", "배포", "빌드", "사용자교육", "사용자매뉴얼", "산출물목록", "산출물일람", "산출물현황", "설치매뉴얼", "완료보고", "운영자교육", "운영자매뉴얼", "전수교육", "종료보고", "체크리스트", "최종산출물", "프로젝트종료"], "주간보고": ["daily", "report", "weekly", "보고", "업무보고", "업무일지", "일일보고", "주간보고", "주보", "팀보고"]}}, "INFRA": {"label": "인프라·운영", "color": "#10b981", "folders": {"월간보고": ["monthly", "quarterly", "반기보고", "분기보고", "운영보고", "운영실적", "운영월보", "운영현황보고", "월간보고"], "임원회의": ["ciso", "cto", "경영진", "본부장", "임원"], "20_구성관리": ["acl", "ad", "apache", "artifactory", "asset", "backup", "bcp", "cd", "cdn", "cert", "certificate", "ci", "cmdb", "cutover", "db", "deploy", "disaster", "dns", "docker", "dr", "firewall", "git", "gitlab", "ha", "hotfix", "hyper-v", "iis", "inventory", "itsm", "jboss", "jenkins", "k8s", "kubernetes", "lb", "ldap", "license", "migration", "mongodb", "mssql", "mysql", "nas", "network", "nexus", "nginx", "oracle", "os패치", "patch", "pipeline", "postgresql", "proxy", "recovery", "redis", "registry", "restore", "rpo", "rto", "s3", "san", "scale", "ssl", "sso", "svn", "sw자산", "tls", "tomcat", "update", "vlan", "vm", "vmware", "waf", "was", "weblogic", "가상화", "계정관리", "고가용", "구성관리", "권한신청", "권한회수", "네트워크", "데이터베이스", "도메인", "디스크증설", "라우팅", "라이선스", "레지스트리", "로드밸런서", "리스토어", "마이그레이션", "미들웨어", "방화벽", "배포", "백업", "백업정책", "변경관리", "변경요청", "보안패치", "복구", "빌드서버", "서버증설", "스위칭", "스토리지", "시스템이관", "업데이트", "업무연속성", "오브젝트스토리지", "이관", "이중화", "인벤토리", "인증서", "인증서갱신", "인증서만료", "자산", "작업결과", "작업계획서", "작업보고", "작업요청", "재해복구", "전환", "접근권한", "정기작업", "증설", "컨테이너", "클러스터", "패치", "프록시", "형상관리", "확장"], "31_증적": ["coredump", "dump", "heapdump", "syslog", "threaddump", "timeline", "경위서", "덤프", "로그", "로그분석", "스크린샷", "이벤트로그", "장애경위", "조치내역", "증적", "캡처", "코어덤프", "타임라인"], "30_장애대응": ["correctiveaction", "downtime", "inc-_", "incident", "postmortem", "rca", "rootcause", "개선대책", "긴급복구", "긴급조치", "다운타임", "사후분석", "서비스중단", "예방조치", "장애", "장애보고", "장애분석", "장애원인", "장애조치", "재발방지"], "40_점검결과": ["alert", "availability", "capacity", "ccm", "cpu", "db점검", "gdpr", "ids", "ips", "isms", "iso27001", "latency", "malware", "memory", "monitoring", "pcidss", "performance", "ransomware", "security", "siem", "sla", "storage", "threshold", "tps", "uptime", "virus", "vulnerability", "가동률", "가용성", "개인정보", "네트워크점검", "디스크", "랜섬웨어", "메모리", "모니터링", "바이러스", "방화벽점검", "백업점검", "보안", "보안감사", "보안이벤트", "서버점검", "성능분석", "성능측정", "악성코드", "알림", "연간점검", "용량", "운영현황", "월간점검", "응답시간", "일일점검", "임계치", "점검", "정기점검", "주간점검", "취약", "취약점", "침입탐지", "침해사고"], "50_매뉴얼": ["escalation", "faq", "guide", "handbook", "installguide", "knownissue", "manual", "setupguide", "sop", "standardoperating", "troubleshoot", "가이드", "구축가이드", "매뉴얼", "문의응답", "비상연락", "설치가이드", "에스컬레이션", "운영절차", "운영지침", "작업절차", "장애대응절차", "트러블슈팅", "표준절차"], "주간보고": ["daily", "report", "weekly", "보고", "업무보고", "업무일지", "운영일지", "일일보고", "주간보고", "주보", "팀보고"]}}, "SALES": {"label": "영업·제안", "color": "#f59e0b", "folders": {"월간보고": ["monthly", "pipeline", "quarterly", "매출현황", "반기보고", "분기보고", "영업실적", "영업현황", "월간보고", "파이프라인"], "임원회의": ["경영진", "영업본부장", "임원"], "22_제안서_발송본": ["rfp", "발송본", "발송확인", "접수번호", "접수확인", "제안서발송", "제출본", "제출확인", "최종제출"], "21_제안서_작업": ["bmc", "cv", "executivesummary", "methodology", "proposal", "reference", "resume", "rfp분석", "scope", "winstrategy", "경쟁분석", "구축사례", "규격서", "기술검토", "기술인력", "기술제안", "기술평가", "레퍼런스", "방법론", "보안관리방안", "사양서", "사업계획", "사업기획", "사업제안", "수행계획", "수행방안", "수행실적", "요구사항분석", "요약본", "이력서", "인력투입계획", "제안범위", "제안서", "제안요약", "제안전략", "차별화", "투입인력", "품질관리방안", "프로젝트관리방안", "핵심메시지"], "23_견적·원가": ["costanalysis", "margin", "nda", "paymentterms", "price", "pricing", "sow", "terms", "가격제안", "견적", "계약조건", "공동수행", "기밀유지", "납기조건", "단가", "마진", "비밀보호", "비밀유지", "비용", "수익률", "수익분석", "약관", "원가", "원가분석", "이윤", "지급조건", "컨소시엄", "파트너", "하도급"], "24_PT자료": ["briefing", "demo", "poc", "pt", "q&a", "기술pt", "기술발표", "기술질의", "데모", "발표", "브리핑", "사전설명", "설명회", "시연", "응답서", "질의답변", "질의서", "프레젠", "프로토타입"], "20_수주활동": ["g2b", "pre-_", "공고", "규격공고", "기술규격", "나라장터", "사전규격", "사전규격검토", "수주", "입찰", "입찰공고"], "90_Archive_실패": ["archive", "미선정", "수주실패", "실패", "실패원인", "종료", "차순위", "탈락", "패인분석", "패찰"], "30_참조자료": ["benchmark", "market", "trend", "voc", "whitepaper", "경쟁사", "고객니즈", "고객분석", "고객요구", "기술동향", "기술자료", "백서", "벤치마크", "솔루션소개", "시장조사", "업계동향", "트렌드"], "주간보고": ["daily", "report", "weekly", "고객미팅", "방문보고", "보고", "상담일지", "영업", "영업일지", "영업활동", "일일보고", "주간보고"]}}, "PROCUREMENT": {"label": "구매·계약", "color": "#8b5cf6", "folders": {"월간보고": ["monthly", "quarterly", "계약실적", "계약현황", "구매실적", "구매현황", "반기보고", "분기보고", "월간보고"], "임원회의": ["경영진", "본부장", "임원"], "31_원본_서명본": ["mou", "계약체결", "공증", "공증서", "기본합의", "날인", "법인인감", "서명날인", "서명본", "서명완료", "양해각서", "업무협약", "원본", "원본스캔", "인감", "체결완료", "최종계약"], "32_사본_작업본": ["contract", "draft", "generalterms", "insurance", "license", "nda", "renewal", "subscription", "sw계약", "warranty", "갱신", "검토본", "계약", "계약변경", "계약보증", "계약초안", "구독", "기밀유지", "도급계약", "라이선스", "변경계약", "보증", "보증금", "보증보험", "보험", "부속합의", "비밀유지", "비밀유지각서", "사용권", "수정본", "약관", "연장", "외주계약", "용역계약", "위수탁", "위임계약", "유지보수계약", "이행보증", "정보보호", "추가계약", "특수조건", "특약", "파견계약", "하자", "하자보증", "협의본", "회신본"], "20_구매": ["hw", "inventory", "invoice", "payment", "po-_", "spec", "sw", "tax", "vendor", "거래처", "검수", "검수서", "검수조서", "견적", "공급업체", "구매", "기술사양", "기술심사", "긴급구매", "낙찰", "납품", "단가계약", "대금청구", "물품", "발주", "벤더", "비교검토", "비교견적", "비품", "사양서", "선급금", "세금계산서", "소모품", "소액구매", "소프트웨어", "수의계약", "스펙", "심사표", "업체목록", "업체선정", "업체평가", "연간계약", "영수증", "인수검사", "인수시험", "입찰공고", "입찰서", "입찰참가", "자격심사", "자재", "잔금", "재고", "적격심사", "정산", "중도금", "지급요청", "지출", "지출결의", "투찰", "평가표", "품의", "하드웨어"], "90_Archive_완료": ["archive", "계약종료", "만료", "완료", "종결"], "주간보고": ["daily", "report", "weekly", "계약일지", "구매일지", "보고", "업무일지", "일일보고", "주간보고"]}}, "HR": {"label": "HR", "color": "#ec4899", "folders": {"월간보고": ["monthly", "quarterly", "turnover", "반기보고", "분기보고", "월간보고", "이직률", "인력현황보고", "인사현황", "채용현황"], "임원회의": ["경영진", "인사본부장", "임원"], "32_재직증명": ["경력증명", "계약갱신", "고용계약", "근로계약", "근속년수", "연봉계약", "재직기간", "재직증명", "증명서발급", "증명요청"], "33_퇴직": ["exitinterview", "retirement", "구조조정", "권고사직", "명예퇴직", "퇴직", "퇴직금", "퇴직면담", "퇴직사유", "퇴직신고", "퇴직연금", "퇴직정산", "퇴직증명", "퇴직처리", "해고", "해임", "희망퇴직"], "31_입사서류": ["attendance", "dresscode", "jobrotation", "leave", "to", "welfare", "개인정보", "경조사", "근태", "당직", "명함", "발령", "병가", "보직변경", "복귀", "복리후생", "복장", "복지", "사물함", "사원증", "상벌", "순환보직", "승격", "승진", "시간외", "야근", "연차", "육아휴직", "인력계획", "인력수급", "인력현황", "인사기록", "인사대장", "인사발령", "인사카드", "인사파일", "입사", "전보", "전입", "전출", "정원", "조직도", "좌석배치", "징계", "초과근무", "출산휴가", "출퇴근", "출향", "파견", "포상", "표창", "휴가"], "40_급여_연봉": ["360", "4대보험", "bonus", "incentive", "kpi", "mbo", "okr", "pay", "peerreview", "salary", "간이세액", "갑근세", "건강보험", "고용보험", "국민연금", "급여", "급여기준", "다면평가", "목표관리", "목표설정", "보너스", "보상체계", "사회보험", "산재보험", "상여", "상여금", "상호평가", "성과급", "성과평가", "세금", "소득세", "업적평가", "역량모델", "역량평가", "연말정산", "연봉", "연봉테이블", "원천징수", "인사고과", "인센티브", "임금체계", "평가", "피어리뷰", "호봉"], "50_교육_훈련": ["1on1", "certificate", "coaching", "e-learning", "e러닝", "hrd", "leadership", "mentoring", "obt", "onboarding", "opic", "ot", "toeic", "training", "관리자교육", "교육", "교육계획", "교육예산", "교육일정", "교육평가", "기술교육", "리더십", "만족도", "멘토링", "면담", "법정교육", "사이버교육", "수료증", "승진자교육", "신입연수", "어학", "영어", "온라인교육", "온보딩", "외국어", "의무교육", "이수", "입문교육", "자격증", "전문교육", "직급교육", "직무교육", "코칭", "토익", "토플", "훈련"], "91_3년보존": ["3년", "3년보존", "채용서류보존"], "92_5년보존": ["5년", "5년보존", "근로계약보존", "급여대장보존"], "주간보고": ["daily", "hr일지", "report", "weekly", "보고", "업무일지", "인사", "인사일지", "일일보고", "주간보고", "팀보고"]}}}, "shared": {"kpi": ["EXECUTIVE", "HR"], "monthly": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "performance": ["EXECUTIVE", "INFRA"], "quarterly": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "분기보고": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "월간보고": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "ciso": ["EXECUTIVE", "INFRA"], "cto": ["DEVELOPER", "EXECUTIVE", "INFRA"], "경영진": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "본부장": ["DEVELOPER", "EXECUTIVE", "INFRA", "PROCUREMENT"], "경쟁분석": ["EXECUTIVE", "SALES"], "벤치마크": ["EXECUTIVE", "SALES"], "sla": ["DEVELOPER", "EXECUTIVE", "INFRA"], "거래처": ["EXECUTIVE", "PROCUREMENT"], "고객사": ["DEVELOPER", "EXECUTIVE"], "vendor": ["EXECUTIVE", "PROCUREMENT"], "공급업체": ["EXECUTIVE", "PROCUREMENT"], "파트너": ["EXECUTIVE", "SALES"], "인사": ["EXECUTIVE", "HR"], "정원": ["EXECUTIVE", "HR"], "archive": ["EXECUTIVE", "PROCUREMENT", "SALES"], "종결": ["EXECUTIVE", "PROCUREMENT"], "daily": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "report": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "weekly": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "보고": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "업무보고": ["DEVELOPER", "EXECUTIVE", "INFRA"], "업무일지": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT"], "일일보고": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "주간보고": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA", "PROCUREMENT", "SALES"], "주보": ["DEVELOPER", "EXECUTIVE", "INFRA"], "팀보고": ["DEVELOPER", "EXECUTIVE", "HR", "INFRA"], "반기보고": ["DEVELOPER", "HR", "INFRA", "PROCUREMENT", "SALES"], "임원": ["DEVELOPER", "HR", "INFRA", "PROCUREMENT", "SALES"], "스크린샷": ["DEVELOPER", "INFRA"], "증적": ["DEVELOPER", "INFRA"], "캡처": ["DEVELOPER", "INFRA"], "git": ["DEVELOPER", "INFRA"], "migration": ["DEVELOPER", "INFRA"], "svn": ["DEVELOPER", "INFRA"], "마이그레이션": ["DEVELOPER", "INFRA"], "형상관리": ["DEVELOPER", "INFRA"], "기술검토": ["DEVELOPER", "SALES"], "sow": ["DEVELOPER", "SALES"], "단가": ["DEVELOPER", "SALES"], "변경요청": ["DEVELOPER", "INFRA"], "warranty": ["DEVELOPER", "PROCUREMENT"], "deploy": ["DEVELOPER", "INFRA"], "납품": ["DEVELOPER", "PROCUREMENT"], "배포": ["DEVELOPER", "INFRA"], "certificate": ["HR", "INFRA"], "inventory": ["INFRA", "PROCUREMENT"], "license": ["INFRA", "PROCUREMENT"], "pipeline": ["INFRA", "SALES"], "라이선스": ["INFRA", "PROCUREMENT"], "개인정보": ["HR", "INFRA"], "사양서": ["PROCUREMENT", "SALES"], "nda": ["PROCUREMENT", "SALES"], "견적": ["PROCUREMENT", "SALES"], "기밀유지": ["PROCUREMENT", "SALES"], "비밀유지": ["PROCUREMENT", "SALES"], "약관": ["PROCUREMENT", "SALES"], "입찰공고": ["PROCUREMENT", "SALES"]}};
+
+const JOB_META = {
+  EXECUTIVE:   { label: "임원·관리자",  color: "#ef4444", icon: "👔" },
+  DEVELOPER:   { label: "개발자",       color: "#3b82f6", icon: "💻" },
+  INFRA:       { label: "인프라·운영",  color: "#10b981", icon: "🖥️" },
+  SALES:       { label: "영업·제안",    color: "#f59e0b", icon: "📊" },
+  PROCUREMENT: { label: "구매·계약",    color: "#8b5cf6", icon: "📋" },
+  HR:          { label: "HR",           color: "#ec4899", icon: "👥" },
+};
+
+const activeJobs = new Set(Object.keys(JOB_META));
+let network = null;
+
+function buildGraph() {
+  const nodes = [];
+  const edges = [];
+  let nodeId = 0;
+  const kwNodeMap = {};  // keyword -> nodeId (for shared edges)
+  const jobNodeIds = {}; // jobKey -> nodeId
+
+  // 1. Job center nodes
+  for (const [jobKey, meta] of Object.entries(JOB_META)) {
+    if (!activeJobs.has(jobKey)) continue;
+    const id = ++nodeId;
+    jobNodeIds[jobKey] = id;
+    nodes.push({
+      id, label: `${meta.icon} ${meta.label}`,
+      color: { background: meta.color, border: meta.color, highlight: { background: meta.color, border: "#fff" } },
+      font: { color: "#fff", size: 16, face: "Malgun Gothic", bold: true },
+      size: 35, shape: "dot", borderWidth: 3,
+      _type: "job", _jobKey: jobKey,
+    });
+  }
+
+  // 2. Folder + keyword nodes
+  for (const [jobKey, jobData] of Object.entries(DATA.jobs)) {
+    if (!activeJobs.has(jobKey)) continue;
+    const meta = JOB_META[jobKey];
+    const jobId = jobNodeIds[jobKey];
+
+    for (const [folderName, keywords] of Object.entries(jobData.folders)) {
+      const folderId = ++nodeId;
+      nodes.push({
+        id: folderId, label: folderName,
+        color: { background: "#334155", border: meta.color, highlight: { background: "#475569", border: meta.color } },
+        font: { color: "#e2e8f0", size: 11, face: "Malgun Gothic" },
+        size: 14 + Math.min(keywords.length, 20), shape: "dot", borderWidth: 2,
+        _type: "folder", _jobKey: jobKey, _keywords: keywords,
+      });
+      edges.push({ from: jobId, to: folderId, color: { color: meta.color + "60" }, width: 2 });
+
+      // Top keywords as leaf nodes (show max 8 per folder to avoid clutter)
+      const showKw = keywords.slice(0, 8);
+      for (const kw of showKw) {
+        const kwId = ++nodeId;
+        const isShared = DATA.shared[kw] && DATA.shared[kw].length > 1;
+        nodes.push({
+          id: kwId, label: kw,
+          color: { background: isShared ? "#f59e0b30" : "#1e293b", border: isShared ? "#f59e0b" : "#475569",
+                   highlight: { background: "#334155", border: meta.color } },
+          font: { color: isShared ? "#fbbf24" : "#94a3b8", size: 9, face: "Malgun Gothic" },
+          size: isShared ? 8 : 5, shape: "dot", borderWidth: isShared ? 2 : 1,
+          _type: "keyword", _kw: kw, _jobKey: jobKey,
+        });
+        edges.push({ from: folderId, to: kwId, color: { color: "#33415540" }, width: 1 });
+
+        if (isShared) {
+          if (!kwNodeMap[kw]) kwNodeMap[kw] = [];
+          kwNodeMap[kw].push(kwId);
+        }
+      }
+    }
+  }
+
+  // 3. Shared keyword edges (connect same keyword across jobs)
+  for (const [kw, nodeIds] of Object.entries(kwNodeMap)) {
+    if (nodeIds.length < 2) continue;
+    for (let i = 0; i < nodeIds.length; i++) {
+      for (let j = i + 1; j < nodeIds.length; j++) {
+        edges.push({
+          from: nodeIds[i], to: nodeIds[j],
+          color: { color: "#f59e0b40" }, width: 1, dashes: true,
+          _type: "shared",
+        });
+      }
+    }
+  }
+
+  return { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+}
+
+function render() {
+  const container = document.getElementById("graph");
+  const data = buildGraph();
+
+  const options = {
+    physics: {
+      solver: "forceAtlas2Based",
+      forceAtlas2Based: { gravitationalConstant: -120, centralGravity: 0.008, springLength: 80, springConstant: 0.04, damping: 0.6 },
+      stabilization: { iterations: 200 },
+    },
+    interaction: { hover: true, tooltipDelay: 100, zoomView: true, dragView: true },
+    layout: { improvedLayout: true },
+  };
+
+  network = new vis.Network(container, data, options);
+
+  network.on("click", function(params) {
+    const infoEl = document.getElementById("info");
+    if (params.nodes.length === 0) { infoEl.style.display = "none"; return; }
+
+    const nodeId = params.nodes[0];
+    const node = data.nodes.get(nodeId);
+    if (!node) { infoEl.style.display = "none"; return; }
+
+    if (node._type === "job") {
+      const jobData = DATA.jobs[node._jobKey];
+      const totalKw = Object.values(jobData.folders).reduce((s, kws) => s + kws.length, 0);
+      infoEl.innerHTML = `<h3 style="color:${JOB_META[node._jobKey].color}">${JOB_META[node._jobKey].icon} ${jobData.label}</h3>
+        <div style="color:#94a3b8;margin-bottom:8px;">${Object.keys(jobData.folders).length}개 폴더 · ${totalKw}개 키워드</div>
+        <div class="kw-list">${Object.entries(jobData.folders).map(([f, kws]) =>
+          `<div style="margin:4px 0;"><b style="color:#e2e8f0;">📁 ${f}</b> (${kws.length})<br>${kws.map(k => `<span>${k}</span>`).join(" ")}</div>`
+        ).join("")}</div>`;
+      infoEl.style.display = "block";
+    } else if (node._type === "folder") {
+      const kws = node._keywords || [];
+      infoEl.innerHTML = `<h3 style="color:${JOB_META[node._jobKey].color}">📁 ${node.label}</h3>
+        <div style="color:#94a3b8;margin-bottom:8px;">${JOB_META[node._jobKey].label} · ${kws.length}개 키워드</div>
+        <div class="kw-list">${kws.map(k => {
+          const isShared = DATA.shared[k] && DATA.shared[k].length > 1;
+          return `<span style="${isShared ? 'background:#f59e0b30;color:#fbbf24;border:1px solid #f59e0b50;' : ''}">${k}${isShared ? ` (${DATA.shared[k].length}개 직군 공유)` : ""}</span>`;
+        }).join(" ")}</div>`;
+      infoEl.style.display = "block";
+    } else if (node._type === "keyword") {
+      const shared = DATA.shared[node._kw];
+      if (shared && shared.length > 1) {
+        infoEl.innerHTML = `<h3 style="color:#f59e0b">🔗 "${node._kw}" — 공유 키워드</h3>
+          <div style="color:#94a3b8;margin-bottom:8px;">${shared.length}개 직군에서 사용</div>
+          <div class="kw-list">${shared.map(j => `<span style="background:${JOB_META[j].color}30;color:${JOB_META[j].color};">${JOB_META[j].icon} ${JOB_META[j].label}</span>`).join(" ")}</div>`;
+        infoEl.style.display = "block";
+      } else {
+        infoEl.style.display = "none";
+      }
+    }
+  });
+
+  // Stats
+  const totalKw = Object.values(DATA.jobs).reduce((s, j) => s + Object.values(j.folders).reduce((s2, kws) => s2 + kws.length, 0), 0);
+  document.getElementById("stats").innerHTML =
+    `<span>직군: ${Object.keys(DATA.jobs).length}</span>
+     <span>폴더: ${Object.values(DATA.jobs).reduce((s, j) => s + Object.keys(j.folders).length, 0)}</span>
+     <span>키워드: ${totalKw}</span>
+     <span style="color:#f59e0b;">공유: ${Object.keys(DATA.shared).length}</span>`;
+}
+
+// Controls
+const controlsEl = document.getElementById("controls");
+for (const [jobKey, meta] of Object.entries(JOB_META)) {
+  const chip = document.createElement("div");
+  chip.className = "chip active";
+  chip.style.borderColor = meta.color;
+  chip.style.background = meta.color;
+  chip.style.color = "#fff";
+  chip.textContent = `${meta.icon} ${meta.label}`;
+  chip.dataset.job = jobKey;
+  chip.onclick = () => {
+    if (activeJobs.has(jobKey)) {
+      activeJobs.delete(jobKey);
+      chip.className = "chip inactive";
+      chip.style.background = "transparent";
+      chip.style.color = meta.color;
+    } else {
+      activeJobs.add(jobKey);
+      chip.className = "chip active";
+      chip.style.background = meta.color;
+      chip.style.color = "#fff";
+    }
+    render();
+  };
+  controlsEl.appendChild(chip);
+}
+
+render();
+</script>
+</body>
+</html>
