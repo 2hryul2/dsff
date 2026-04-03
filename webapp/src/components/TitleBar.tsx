@@ -33,7 +33,7 @@ export default function TitleBar() {
   return (
     <div style={S.bar}>
       <div style={S.left}>
-        <span style={S.appIcon}>📂</span>
+        <img src="assets/icon-32.png" alt="DS FolderFit" style={{ width: 18, height: 18 }} onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         <span style={S.appName}>DS FolderFit</span>
       </div>
       <div style={S.winBtns}>

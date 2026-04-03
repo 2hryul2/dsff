@@ -30,31 +30,34 @@
     "copyright": "Copyright © 2026 DS",
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "assets/icon.ico",
+      "assets/icon-32.png",
+      "assets/icon-256.png"
     ],
     "extraResources": [
       {
         "from": "../dist/dsff.exe",
         "to": "dsff.exe"
+      },
+      {
+        "from": "../src/reference",
+        "to": "reference"
       }
     ],
     "directories": {
       "output": "../dist"
     },
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
-      ],
-      "artifactName": "DSFolderFit-portable.exe"
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "allowToChangeInstallationDirectory": true
     }
   }
 }

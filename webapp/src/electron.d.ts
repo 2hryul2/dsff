@@ -40,6 +40,10 @@ declare global {
       loadConfig: () => Promise<ManagedFolder[]>;
       saveConfig: (data: ManagedFolder[]) => Promise<boolean>;
 
+      /* Last state (마지막 탐색 경로·파일 복원) */
+      saveLastState: (data: { folderPath: string; currentPath: string; selectedFile: string | null }) => Promise<boolean>;
+      loadLastState: () => Promise<{ folderPath: string; currentPath: string; selectedFile: string | null } | null>;
+
       /* DSFF CLI bridge */
       analyze: (path: string) => Promise<DsffResult<AnalysisData>>;
       organize: (path: string, mode: string, execute: boolean) => Promise<DsffResult<OrganizePlan | OrganizeResult>>;
@@ -50,6 +54,18 @@ declare global {
       watchStart: (path: string) => Promise<DsffResult<void>>;
       watchStop: (path: string) => Promise<DsffResult<void>>;
       onWatchEvent: (cb: (data: import("./types").WatchEvent) => void) => void;
+
+      /* File clipboard operations */
+      copyFileTo: (srcPath: string, destDir: string) => Promise<DsffResult<{ destPath: string }>>;
+      moveFile: (srcPath: string, destDir: string) => Promise<DsffResult<{ destPath: string }>>;
+
+      /* Custom rules (키워드 편집 영구 저장) */
+      loadCustomRules: () => Promise<DsffResult<Record<string, Record<string, string[]>>>>;
+      saveCustomRules: (data: Record<string, Record<string, string[]>>) => Promise<DsffResult<undefined>>;
+
+      /* Reference markdown */
+      readReferenceFile: (fileName: string) => Promise<DsffResult<string>>;
+      writeReferenceFile: (fileName: string, folderName: string, keywords: string[]) => Promise<DsffResult<undefined>>;
     };
   }
 }

@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   loadConfig: ()       => ipcRenderer.invoke("config:load"),
   saveConfig: (data)   => ipcRenderer.invoke("config:save", data),
 
+  /* Last state (마지막 탐색 경로·파일 복원) */
+  saveLastState: (data) => ipcRenderer.invoke("state:save", data),
+  loadLastState: ()     => ipcRenderer.invoke("state:load"),
+
   /* DSFF CLI bridge */
   analyze:     (path) => ipcRenderer.invoke("dsff:analyze", path),
   organize:    (path, mode, execute) => ipcRenderer.invoke("dsff:organize", path, mode, execute),
@@ -42,4 +46,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onWatchEvent: (cb) => {
     ipcRenderer.on("watch:event", (_event, data) => cb(data));
   },
+
+  /* Custom rules (키워드 편집 영구 저장) */
+  loadCustomRules: () => ipcRenderer.invoke("rules:load"),
+  saveCustomRules: (data) => ipcRenderer.invoke("rules:save", data),
+
+  /* File clipboard operations */
+  copyFileTo: (srcPath, destDir) => ipcRenderer.invoke("fs:copyTo", srcPath, destDir),
+  moveFile: (srcPath, destDir) => ipcRenderer.invoke("fs:moveFile", srcPath, destDir),
+
+  /* Reference markdown */
+  readReferenceFile: (fileName) => ipcRenderer.invoke("fs:readReferenceFile", fileName),
+  writeReferenceFile: (fileName, folderName, keywords) => ipcRenderer.invoke("fs:writeReferenceFile", fileName, folderName, keywords),
 });

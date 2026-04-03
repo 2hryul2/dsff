@@ -200,6 +200,18 @@ function LazySubFolderTree({
   );
 }
 
+// 관리폴더별 구분 배경색 팔레트 (홀수/짝수 번갈아 적용)
+const FOLDER_BG_PALETTE = [
+  { normal: "#ffffff",   hover: "#f0f4ff", active: "#dbeafe", border: "#3b82f6" },  // 파랑
+  { normal: "#fefce8",   hover: "#fef9c3", active: "#fef08a", border: "#ca8a04" },  // 노랑
+  { normal: "#f0fdf4",   hover: "#dcfce7", active: "#bbf7d0", border: "#16a34a" },  // 초록
+  { normal: "#fff7ed",   hover: "#ffedd5", active: "#fed7aa", border: "#ea580c" },  // 주황
+  { normal: "#fdf2f8",   hover: "#fce7f3", active: "#fbcfe8", border: "#db2777" },  // 핑크
+  { normal: "#f5f3ff",   hover: "#ede9fe", active: "#ddd6fe", border: "#7c3aed" },  // 보라
+  { normal: "#ecfeff",   hover: "#cffafe", active: "#a5f3fc", border: "#0891b2" },  // 시안
+  { normal: "#fef2f2",   hover: "#fee2e2", active: "#fecaca", border: "#dc2626" },  // 빨강
+];
+
 export default function NavigationPane({ folders, active, width, refreshKey, onSelect, onAddFolder, onRemoveFolder, onRenameFolder, onNavigate }: Props) {
   const [hov, setHov] = useState<string | null>(null);
   const [addHov, setAddHov] = useState(false);
@@ -242,12 +254,13 @@ export default function NavigationPane({ folders, active, width, refreshKey, onS
             폴더를 추가해서<br />관리를 시작하세요
           </div>
         )}
-        {folders.map((f) => {
+        {folders.map((f, folderIdx) => {
           const isActive = active?.path === f.path;
           const isHov = hov === f.path;
           const isExpanded = expandedFolders.has(f.path);
           const isEditing = editingPath === f.path;
           const analyzedAt = formatAnalyzedAt(f.analyzedAt);
+          const palette = FOLDER_BG_PALETTE[folderIdx % FOLDER_BG_PALETTE.length];
           return (
             <div key={f.path}>
               <div
@@ -257,8 +270,9 @@ export default function NavigationPane({ folders, active, width, refreshKey, onS
                 style={{
                   position: "relative", display: "flex", alignItems: "flex-start", gap: 8,
                   padding: "7px 12px", cursor: "pointer",
-                  background: isActive ? "#dbeafe" : isHov ? "#ebebeb" : "transparent",
-                  borderLeft: isActive ? "3px solid #2563eb" : "3px solid transparent",
+                  background: isActive ? palette.active : isHov ? palette.hover : palette.normal,
+                  borderLeft: isActive ? `3px solid ${palette.border}` : "3px solid transparent",
+                  borderBottom: "1px solid #e8e8e8",
                 }}
               >
                 <span onClick={(e) => { e.stopPropagation(); toggleFolderExpand(f.path); }}
@@ -289,7 +303,7 @@ export default function NavigationPane({ folders, active, width, refreshKey, onS
                     <div
                       onDoubleClick={(e) => { e.stopPropagation(); startEdit(f); }}
                       title="더블클릭하여 이름 변경"
-                      style={{ fontWeight: isActive ? 600 : 400, fontSize: 13, color: isActive ? "#1d4ed8" : "#1a1a1a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      style={{ fontWeight: isActive ? 600 : 500, fontSize: 13, color: isActive ? palette.border : "#1a1a1a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                     >{f.label}</div>
                   )}
                   <div style={{ fontSize: 10, color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.path}</div>

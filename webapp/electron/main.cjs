@@ -9,6 +9,8 @@ let win;
 
 /* ── Config path (userData/dsff-folders.json) ── */
 const configPath = () => path.join(app.getPath("userData"), "dsff-folders.json");
+const customRulesPath = () => path.join(app.getPath("userData"), "dsff-custom-rules.json");
+const lastStatePath = () => path.join(app.getPath("userData"), "dsff-last-state.json");
 
 /* ── Python CLI bridge ── */
 let dsffCmd = null;   // { exe: string, args: string[] }
@@ -129,6 +131,7 @@ function createWindow() {
     minHeight: 560,
     frame: false,
     backgroundColor: "#f3f3f3",
+    icon: path.join(__dirname, "../assets/icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -178,6 +181,7 @@ ipcMain.handle("fs:readDirRecursive", async (_e, dirPath) => {
             size: st.size,
             modified: st.mtime.toISOString(),
             created: st.birthtime.toISOString(),
+            accessed: st.atime.toISOString(),
           });
         } catch { /* skip */ }
       }
@@ -222,6 +226,51 @@ ipcMain.handle("fs:copy", async (_e, srcPath) => {
     return { ok: true, data: { destPath } };
   } catch (err) {
     return { ok: false, error: String(err) };
+  }
+});
+
+/* ── Copy file/folder to target directory ── */
+ipcMain.handle("fs:copyTo", async (_e, srcPath, destDir) => {
+  try {
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const baseName = path.basename(srcPath);
+    let destPath = path.join(destDir, baseName);
+    // 같은 이름 충돌 시 접미사 추가
+    if (fs.existsSync(destPath)) {
+      const ext = path.extname(baseName);
+      const stem = path.basename(baseName, ext);
+      let counter = 1;
+      while (fs.existsSync(destPath)) {
+        destPath = path.join(destDir, `${stem}(${counter})${ext}`);
+        counter++;
+      }
+    }
+    fs.cpSync(srcPath, destPath, { recursive: true });
+    return { ok: true, data: { destPath } };
+  } catch (err) {
+    return { ok: false, error: `[copyTo] ${String(err)}` };
+  }
+});
+
+/* ── Move file/folder to target directory ── */
+ipcMain.handle("fs:moveFile", async (_e, srcPath, destDir) => {
+  try {
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const baseName = path.basename(srcPath);
+    let destPath = path.join(destDir, baseName);
+    if (fs.existsSync(destPath)) {
+      const ext = path.extname(baseName);
+      const stem = path.basename(baseName, ext);
+      let counter = 1;
+      while (fs.existsSync(destPath)) {
+        destPath = path.join(destDir, `${stem}(${counter})${ext}`);
+        counter++;
+      }
+    }
+    fs.renameSync(srcPath, destPath);
+    return { ok: true, data: { destPath } };
+  } catch (err) {
+    return { ok: false, error: `[moveFile] ${String(err)}` };
   }
 });
 
@@ -343,6 +392,47 @@ ipcMain.handle("config:save", (_e, data) => {
     return true;
   } catch {
     return false;
+  }
+});
+
+/* ── Last state: save/load (마지막 탐색 경로·파일 복원용) ── */
+ipcMain.handle("state:save", (_e, data) => {
+  try {
+    fs.writeFileSync(lastStatePath(), JSON.stringify(data, null, 2), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle("state:load", () => {
+  try {
+    const p = lastStatePath();
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+});
+
+/* ── Custom rules: load ── */
+ipcMain.handle("rules:load", () => {
+  try {
+    const p = customRulesPath();
+    if (!fs.existsSync(p)) return { ok: true, data: {} };
+    return { ok: true, data: JSON.parse(fs.readFileSync(p, "utf8")) };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* ── Custom rules: save ── */
+ipcMain.handle("rules:save", (_e, data) => {
+  try {
+    fs.writeFileSync(customRulesPath(), JSON.stringify(data, null, 2), "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 });
 
@@ -489,6 +579,75 @@ ipcMain.handle("dsff:watchStop", async (_e, targetPath) => {
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+/* ── Reference markdown 파일 읽기 ── */
+function getRefDir() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "reference")
+    : path.join(__dirname, "../../src/reference");
+}
+
+ipcMain.handle("fs:readReferenceFile", async (_e, fileName) => {
+  // 경로 이동 공격 차단
+  if (fileName.includes("..") || fileName.includes("/") || fileName.includes("\\")) {
+    return { ok: false, error: "유효하지 않은 파일명" };
+  }
+  try {
+    const filePath = path.join(getRefDir(), fileName);
+    if (!fs.existsSync(filePath)) return { ok: false, error: `파일 없음: ${fileName}` };
+    const content = fs.readFileSync(filePath, "utf8");
+    return { ok: true, data: content };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+/* ── Reference markdown 파일 쓰기 (키워드 업데이트) ── */
+ipcMain.handle("fs:writeReferenceFile", async (_e, fileName, folderName, keywords) => {
+  if (fileName.includes("..") || fileName.includes("/") || fileName.includes("\\")) {
+    return { ok: false, error: "유효하지 않은 파일명" };
+  }
+  try {
+    const filePath = path.join(getRefDir(), fileName);
+    if (!fs.existsSync(filePath)) return { ok: false, error: `파일 없음: ${fileName}` };
+
+    let content = fs.readFileSync(filePath, "utf8");
+
+    // 해당 폴더 섹션을 찾아 키워드 줄만 교체
+    // 형식: ## 📁 폴더명 (키워드수)\n\n키워드1, 키워드2, ...
+    const escapedName = folderName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sectionRegex = new RegExp(
+      `(## 📁 ${escapedName})\\s*\\(\\d+\\)(\\s*\\n\\s*\\n)[^\\n]*`,
+      "m"
+    );
+
+    const match = content.match(sectionRegex);
+    if (!match) {
+      return { ok: false, error: `[writeReferenceFile] 폴더 섹션 미발견: ${folderName}` };
+    }
+
+    const newKeywordLine = keywords.join(", ");
+    const replacement = `${match[1]} (${keywords.length})${match[2]}${newKeywordLine}`;
+    content = content.replace(sectionRegex, replacement);
+
+    // 상단 요약줄의 총 키워드 수도 갱신
+    const allSections = content.split(/^## 📁\s*/gm).slice(1);
+    let totalKw = 0;
+    for (const sec of allSections) {
+      const hm = sec.match(/^\S.*?\((\d+)\)/);
+      if (hm) totalKw += parseInt(hm[1], 10);
+    }
+    content = content.replace(
+      />\s*\*\*\d+개 폴더\*\*\s*·\s*\*\*\d+개 키워드\*\*/,
+      `> **${allSections.length}개 폴더** · **${totalKw}개 키워드**`
+    );
+
+    fs.writeFileSync(filePath, content, "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `[writeReferenceFile] ${String(err)}` };
   }
 });
 

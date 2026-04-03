@@ -1,6 +1,80 @@
 import { useState, useEffect, useRef } from "react";
 import type { ManagedFolder, SmartOrganizeFilePlan } from "../../types";
 
+/* ── 직군별 프로필 → reference MD 파일 매핑 ── */
+const PROFILE_MD_MAP: Record<string, string> = {
+  "👔 임원·관리자": "00_임원_관리자.md",
+  "💻 개발자":      "01_기발자.md",
+  "🖥️ 인프라·운영": "02_인프라운영.md",
+  "📊 영업·제안":   "03_영업제안.md",
+  "📋 구매·계약":   "04_구매계약.md",
+  "👥 HR":          "05_HR.md",
+};
+
+/* ── AI추천 구조 트리 타입 (DetailsPane 에서 사용) ── */
+export interface AiStructureNode {
+  name: string;
+  keywordCount?: number;
+  keywords?: string[];
+  children: AiStructureNode[];
+}
+
+/* ── MD 파일 파싱 → 디렉토리 트리 변환 ── */
+function parseMdToStructure(md: string, folders: string[]): AiStructureNode[] {
+  // MD에서 폴더별 키워드 수 + 키워드 목록 추출
+  const kwMap = new Map<string, { count: number; keywords: string[] }>();
+  const sections = md.split(/^## 📁\s*/gm).slice(1);
+  for (const section of sections) {
+    const headerMatch = section.match(/^(.+?)\s*\((\d+)\)/);
+    if (!headerMatch) continue;
+    const folderName = headerMatch[1];
+    const count = parseInt(headerMatch[2], 10);
+    // 키워드 줄: 헤더 다음 줄에 쉼표 구분 키워드 나열
+    const bodyLine = section.slice(section.indexOf("\n") + 1).trim().split("\n")[0];
+    // 볼드(**) 마크다운과 공유 정보 "(N개 직군 공유)" 제거 후 키워드만 추출
+    const keywords = bodyLine
+      .replace(/\*\*/g, "")
+      .split(",")
+      .map((k) => k.replace(/\s*\(\d+개 직군 공유\)/g, "").trim())
+      .filter(Boolean);
+    kwMap.set(folderName, { count, keywords });
+  }
+
+  // folders[] 배열로 트리 구축 (예: "00_업무보고\\월간보고")
+  const rootMap = new Map<string, AiStructureNode>();
+
+  for (const fp of folders) {
+    if (fp === "삭제대상") continue;
+    const parts = fp.split(/[/\\]/);
+    const topName = parts[0];
+
+    if (!rootMap.has(topName)) {
+      rootMap.set(topName, { name: topName, children: [] });
+    }
+    let cur = rootMap.get(topName)!;
+
+    for (let i = 1; i < parts.length; i++) {
+      const childName = parts[i];
+      let child = cur.children.find((c) => c.name === childName);
+      if (!child) {
+        child = { name: childName, children: [] };
+        cur.children.push(child);
+      }
+      cur = child;
+    }
+
+    // 리프 노드에 키워드 수 + 목록 매칭
+    const leafName = parts[parts.length - 1];
+    const kwData = kwMap.get(leafName);
+    if (kwData) {
+      cur.keywordCount = kwData.count;
+      cur.keywords = kwData.keywords;
+    }
+  }
+
+  return Array.from(rootMap.values());
+}
+
 /* ── 사용자 생성 파일 확장자 화이트리스트 ── */
 const USER_EXT = new Set([
   /* 업무 문서 */   "xlsx","pptx","ppt","pdf","docx","xls","doc","csv","xlsb","hwp","hwpx",
@@ -119,9 +193,10 @@ const BASIC_PROFILES: TemplateProfile[] = [
 
 /* ══════════════════════════════════════════════════════════════
    직군별 규칙 테이블 (데이터 주도형 — 총 432+ 규칙)
+   런타임 수정 가능하도록 let 선언
    ══════════════════════════════════════════════════════════════ */
 
-const RULES_EXECUTIVE: ClassifyRule[] = [
+let RULES_EXECUTIVE: ClassifyRule[] = [
   /* ── 00_업무보고 ── */
   { pattern: "월간보고|monthly|분기보고|quarterly|반기|상반기|하반기", folder: "00_업무보고\\월간보고" },
   { pattern: "실적|매출|revenue|performance|경영실적|영업이익|당기순이익", folder: "00_업무보고\\월간보고" },
@@ -162,7 +237,7 @@ const RULES_EXECUTIVE: ClassifyRule[] = [
   { pattern: "업무일지|업무보고|주보|팀보고|부서보고", folder: "00_업무보고\\주간보고" },
 ];
 
-const RULES_DEVELOPER: ClassifyRule[] = [
+let RULES_DEVELOPER: ClassifyRule[] = [
   /* ── 00_업무보고 ── */
   { pattern: "월간보고|monthly|분기보고|quarterly|반기보고", folder: "00_업무보고\\월간보고" },
   { pattern: "임원|경영진|cto|본부장", folder: "00_업무보고\\임원회의" },
@@ -239,7 +314,7 @@ const RULES_DEVELOPER: ClassifyRule[] = [
   { pattern: "업무일지|업무보고|주보|팀보고", folder: "00_업무보고\\주간보고" },
 ];
 
-const RULES_INFRA: ClassifyRule[] = [
+let RULES_INFRA: ClassifyRule[] = [
   /* ── 00_업무보고 ── */
   { pattern: "월간보고|monthly|분기보고|quarterly|반기보고", folder: "00_업무보고\\월간보고" },
   { pattern: "운영보고|운영월보|운영실적|운영현황보고", folder: "00_업무보고\\월간보고" },
@@ -294,7 +369,7 @@ const RULES_INFRA: ClassifyRule[] = [
   { pattern: "업무일지|업무보고|주보|팀보고|운영일지", folder: "00_업무보고\\주간보고" },
 ];
 
-const RULES_SALES: ClassifyRule[] = [
+let RULES_SALES: ClassifyRule[] = [
   /* ── 00_업무보고 ── */
   { pattern: "월간보고|monthly|분기보고|quarterly|반기보고", folder: "00_업무보고\\월간보고" },
   { pattern: "영업실적|파이프라인|pipeline|영업현황|매출현황", folder: "00_업무보고\\월간보고" },
@@ -329,7 +404,7 @@ const RULES_SALES: ClassifyRule[] = [
   { pattern: "영업일지|영업활동|고객미팅|방문보고|상담일지", folder: "00_업무보고\\주간보고" },
 ];
 
-const RULES_PROCUREMENT: ClassifyRule[] = [
+let RULES_PROCUREMENT: ClassifyRule[] = [
   /* ── 00_업무보고 ── */
   { pattern: "월간보고|monthly|분기보고|quarterly|반기보고", folder: "00_업무보고\\월간보고" },
   { pattern: "구매현황|구매실적|계약현황|계약실적", folder: "00_업무보고\\월간보고" },
@@ -494,6 +569,115 @@ function getJobProfiles(): TemplateProfile[] {
   ];
 }
 
+/* ── 프로필명 → 규칙 테이블 매핑 (키워드 편집용) ── */
+function getRulesForProfile(profileName: string): ClassifyRule[] | null {
+  if (profileName.includes("임원")) return RULES_EXECUTIVE;
+  if (profileName.includes("개발자")) return RULES_DEVELOPER;
+  if (profileName.includes("인프라")) return RULES_INFRA;
+  if (profileName.includes("영업")) return RULES_SALES;
+  if (profileName.includes("구매")) return RULES_PROCUREMENT;
+  if (profileName.includes("HR")) return getHrRules(new Date().getFullYear());
+  return null;
+}
+
+/**
+ * 사용자 커스텀 규칙 저장소.
+ * 구조: { profileName: { folderName: ["keyword1", "keyword2", ...] } }
+ * 앱 시작 시 파일에서 로드되어 메모리 규칙 테이블에 적용됨.
+ */
+let customRulesStore: Record<string, Record<string, string[]>> = {};
+
+/**
+ * 앱 시작 시 호출 — 저장된 커스텀 규칙을 파일에서 로드하여 메모리 규칙 테이블에 적용
+ */
+export async function loadCustomRulesFromDisk(): Promise<void> {
+  try {
+    const res = await window.electronAPI?.loadCustomRules();
+    if (res?.ok && res.data && Object.keys(res.data).length > 0) {
+      customRulesStore = res.data;
+      // 저장된 커스텀 규칙을 각 프로필 규칙 테이블에 적용
+      for (const [profileName, folderMap] of Object.entries(customRulesStore)) {
+        for (const [folderName, keywords] of Object.entries(folderMap)) {
+          applyKeywordsToRules(profileName, folderName, keywords);
+        }
+      }
+    }
+  } catch { /* 파일 없으면 무시 */ }
+}
+
+/**
+ * 커스텀 규칙을 디스크에 저장
+ */
+async function saveCustomRulesToDisk(): Promise<void> {
+  try {
+    await window.electronAPI?.saveCustomRules(customRulesStore);
+  } catch { /* 저장 실패 무시 */ }
+}
+
+/**
+ * 메모리 규칙 테이블에 키워드를 적용 (내부 함수)
+ */
+function applyKeywordsToRules(profileName: string, folderName: string, newKeywords: string[]): boolean {
+  const rules = getRulesForProfile(profileName);
+  if (!rules) return false;
+
+  const targetIndices: number[] = [];
+  for (let i = 0; i < rules.length; i++) {
+    const r = rules[i];
+    if (!r.pattern) continue;
+    const folderLeaf = r.folder.split(/[/\\]/).pop() ?? r.folder;
+    if (folderLeaf === folderName) {
+      targetIndices.push(i);
+    }
+  }
+
+  if (targetIndices.length === 0 && newKeywords.length > 0) {
+    const profiles = getJobProfiles();
+    const profile = profiles.find((p) => p.name === profileName);
+    const folderPath = profile?.folders.find((f) => f.endsWith(folderName)) ?? folderName;
+    rules.push({ pattern: newKeywords.join("|"), folder: folderPath });
+    return true;
+  }
+
+  const mergedPattern = newKeywords.join("|");
+  if (targetIndices.length > 0) {
+    rules[targetIndices[0]].pattern = mergedPattern;
+    for (let i = targetIndices.length - 1; i >= 1; i--) {
+      rules.splice(targetIndices[i], 1);
+    }
+  }
+  return true;
+}
+
+/**
+ * 특정 폴더의 키워드를 업데이트한다.
+ * 메모리 규칙 테이블 적용 + 디스크에 영구 저장.
+ */
+export function updateFolderKeywords(profileName: string, folderName: string, newKeywords: string[]): boolean {
+  // 1. 메모리 규칙 테이블에 적용
+  const ok = applyKeywordsToRules(profileName, folderName, newKeywords);
+  if (!ok) return false;
+
+  // 2. 커스텀 규칙 저장소에 기록
+  if (!customRulesStore[profileName]) customRulesStore[profileName] = {};
+  customRulesStore[profileName][folderName] = [...newKeywords];
+
+  // 3. 디스크에 비동기 저장 (커스텀 규칙 JSON)
+  saveCustomRulesToDisk();
+
+  // 4. 원본 MD 파일도 업데이트 → 다음 로딩 시에도 키워드 반영
+  const mdFileName = PROFILE_MD_MAP[profileName];
+  if (mdFileName) {
+    window.electronAPI?.writeReferenceFile(mdFileName, folderName, newKeywords)
+      .then((res) => {
+        if (!res?.ok) console.warn("[updateFolderKeywords] MD 파일 업데이트 실패:", res?.error);
+      })
+      .catch((err) => console.warn("[updateFolderKeywords] MD 파일 쓰기 오류:", err));
+  }
+
+  return true;
+}
+
 /* ── 트리 구조 ── */
 interface TreeNode {
   name: string;
@@ -624,6 +808,8 @@ function TreePane({
   onDragStart, onDragEnd, onDropOnFolder, onSetDropTarget, dragSrcPath, dropTarget,
   // inline edit
   editing, editVal, onStartEdit, onEditChange, onCommitEdit, onCancelEdit,
+  // file selection (after mode)
+  selectedFile, onSelectFile,
 }: {
   node: TreeNode; depth?: number; mode: "current" | "after"; folderPath?: string;
   onToggleSkip?: (idx: number) => void;
@@ -643,6 +829,9 @@ function TreePane({
   onEditChange?: (v: string) => void;
   onCommitEdit?: () => void;
   onCancelEdit?: () => void;
+  // file selection (after mode)
+  selectedFile?: string | null;
+  onSelectFile?: (srcPath: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   const hasChildren = node.children.size > 0 || node.files.length > 0;
@@ -665,7 +854,7 @@ function TreePane({
   return (
     <div>
       {/* ── 폴더 행 ── */}
-      <div onClick={() => hasChildren && setOpen((v) => !v)}
+      <div onClick={() => hasChildren && !dragSrcPath && setOpen((v) => !v)}
         onDragOver={mode === "after" && depth > 0 ? (e) => { e.preventDefault(); e.stopPropagation(); onSetDropTarget?.(folderPath); } : undefined}
         onDragEnter={mode === "after" && depth > 0 ? (e) => { e.preventDefault(); e.stopPropagation(); onSetDropTarget?.(folderPath); } : undefined}
         onDrop={mode === "after" && depth > 0 && onDropOnFolder ? (e) => { e.preventDefault(); e.stopPropagation(); onDropOnFolder(folderPath); } : undefined}
@@ -730,6 +919,7 @@ function TreePane({
                 dragSrcPath={dragSrcPath} dropTarget={dropTarget}
                 editing={editing} editVal={editVal}
                 onStartEdit={onStartEdit} onEditChange={onEditChange} onCommitEdit={onCommitEdit} onCancelEdit={onCancelEdit}
+                selectedFile={selectedFile} onSelectFile={onSelectFile}
               />
             );
           })}
@@ -737,18 +927,24 @@ function TreePane({
             const idx = planIndex?.get(p.srcPath) ?? -1;
             const isEditingThisFile = editing?.type === "file" && editing.srcPath === p.srcPath;
             const isDragging = dragSrcPath === p.srcPath;
+            const isSelected = mode === "after" && selectedFile === p.srcPath;
             return (
               <div key={p.srcPath}
                 draggable={mode === "after"}
-                onDragStart={mode === "after" && onDragStart ? (e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(p.srcPath); } : undefined}
+                onDragStart={mode === "after" && onDragStart ? (e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = "move"; onDragStart(p.srcPath); } : undefined}
                 onDragEnd={mode === "after" && onDragEnd ? () => onDragEnd() : undefined}
+                onDragOver={mode === "after" && depth > 0 ? (e) => { e.preventDefault(); e.stopPropagation(); onSetDropTarget?.(folderPath); } : undefined}
+                onDrop={mode === "after" && depth > 0 && onDropOnFolder ? (e) => { e.preventDefault(); e.stopPropagation(); onDropOnFolder(folderPath); } : undefined}
+                onClick={mode === "after" && onSelectFile ? () => onSelectFile(p.srcPath) : undefined}
                 style={{
                   display: "flex", alignItems: "center", gap: 5, padding: "2px 8px",
                   paddingLeft: 8 + indent + 14, opacity: isDragging ? 0.3 : (p.skip ? 0.35 : 1),
-                  cursor: mode === "after" ? "grab" : "default",
+                  cursor: mode === "after" ? "pointer" : "default",
+                  background: isSelected ? "#dbeafe" : "transparent",
+                  borderRadius: isSelected ? 3 : 0,
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f9fafb"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = "#f9fafb"; }}
+                onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               >
                 {mode === "current" && onToggleSkip && idx >= 0 && (
                   <input type="checkbox" checked={!p.skip} onChange={() => onToggleSkip(idx)}
@@ -792,11 +988,14 @@ function TreePane({
 /* ── 메인 컴포넌트 ── */
 interface Props {
   folder: ManagedFolder;
+  searchQuery?: string;
   onCancel: () => void;
   onRefresh: () => void;
+  onAiStructure?: (data: AiStructureNode[] | null, profileName: string | null) => void;
+  onRegisterReapply?: (fn: () => void) => void;
 }
 
-export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props) {
+export default function SmartOrganizeView({ folder, searchQuery, onCancel, onRefresh, onAiStructure, onRegisterReapply }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [plans, setPlans] = useState<SmartOrganizeFilePlan[]>([]);
@@ -819,15 +1018,42 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
   const [customFolders, setCustomFolders] = useState<string[]>([]);
   // active template folders (빈 폴더 포함 표시)
   const [activeTemplateFolders, setActiveTemplateFolders] = useState<string[]>([]);
+  // after 패널 파일 선택 (← 제외 기능용)
+  const [selectedAfterFile, setSelectedAfterFile] = useState<string | null>(null);
+
+  // 외부에서 재분류 트리거 (키워드 저장 후 호출)
+  useEffect(() => {
+    if (onRegisterReapply) {
+      onRegisterReapply(() => {
+        if (!activeProfileName) return;
+        const profiles = [...BASIC_PROFILES, ...getJobProfiles()];
+        const profile = profiles.find((p) => p.name === activeProfileName);
+        if (profile) {
+          setPlans((prev) => prev.map((p) => ({
+            ...p,
+            destFolder: profile.classify(p.fileName, p.ext),
+            reason: `${profile.name} 템플릿 (키워드 수정)`,
+          })));
+          setToast({ msg: "키워드 수정 반영 — 파일 재분류 완료", ok: true });
+          setTimeout(() => setToast(null), 3000);
+          // AI추천 구조 트리는 App.tsx에서 이미 갱신됨 — 여기서 MD를 다시 읽으면
+          // 커스텀 키워드가 원본 MD 데이터로 덮어써지므로 재빌드하지 않음
+        }
+      });
+    }
+  }, [activeProfileName, onRegisterReapply]);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     setActiveProfileName(null);
-    window.electronAPI?.readDirRecursive(folder.path).then((res) => {
-      if (res?.ok && res.data) setPlans(buildPlans(res.data));
-      else setError(res?.error ?? "파일 목록 불러오기 실패");
-    }).finally(() => setLoading(false));
+    // 저장된 커스텀 규칙을 먼저 로드한 뒤 파일 스캔
+    loadCustomRulesFromDisk().then(() => {
+      window.electronAPI?.readDirRecursive(folder.path).then((res) => {
+        if (res?.ok && res.data) setPlans(buildPlans(res.data));
+        else setError(res?.error ?? "파일 목록 불러오기 실패");
+      }).finally(() => setLoading(false));
+    });
   }, [folder.path]);
 
   function toggleSkip(idx: number) {
@@ -841,6 +1067,16 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
       const allActive = srcPaths.every((p) => { const plan = planMap.get(p); return plan && !plan.skip; });
       return prev.map((p) => pathSet.has(p.srcPath) ? { ...p, skip: allActive } : p);
     });
+  }
+
+  /* ── ← 버튼: 정리 후 상태에서 선택된 파일을 제외 ── */
+  function handleExcludeSelected() {
+    if (!selectedAfterFile) return;
+    const idx = planIndex.get(selectedAfterFile);
+    if (idx !== undefined) {
+      setPlans((prev) => prev.map((p, i) => i === idx ? { ...p, skip: true } : p));
+    }
+    setSelectedAfterFile(null);
   }
 
   /* ── 드래그 & 드롭: 정리 후 패널에서 파일을 다른 폴더로 이동 ── */
@@ -1044,11 +1280,16 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
     </div>
   );
 
-  const active = plans.filter((p) => !p.skip).length;
+  // 필터 적용: searchQuery가 있으면 파일명으로 필터링
+  const filteredPlans = searchQuery
+    ? plans.filter((p) => (p.fileName ?? "").toLowerCase().includes(searchQuery.toLowerCase()))
+    : plans;
+  const active = filteredPlans.filter((p) => !p.skip).length;
   const rootName = folder.path.split(/[/\\]/).pop() ?? folder.label;
+  // planIndex는 원본 plans 인덱스 참조 (toggleSkip 등에서 plans[idx] 접근하므로)
   const planIndex = new Map<string, number>(plans.map((p, i) => [p.srcPath, i]));
-  const currentTree = buildCurrentTree(plans, folder.path);
-  const afterTree = buildAfterTree(plans, rootName, activeTemplateFolders.length > 0 ? activeTemplateFolders : undefined);
+  const currentTree = buildCurrentTree(filteredPlans, folder.path);
+  const afterTree = buildAfterTree(filteredPlans, rootName, activeTemplateFolders.length > 0 ? activeTemplateFolders : undefined);
   // 이름순 정렬 (재귀)
   sortTreeChildren(afterTree);
   // 사용자지정 폴더 + placeholder 후처리 (정렬 후 추가하여 하단 배치)
@@ -1064,6 +1305,18 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
     afterTree.children.set(CUSTOM_PLACEHOLDER, existing);
   }
 
+  // 직군별 버튼 클릭 → AI추천 구조 패널에 트리 표시
+  function loadAiStructure(profile: TemplateProfile) {
+    const fileName = PROFILE_MD_MAP[profile.name];
+    if (!fileName || !onAiStructure) return;
+    window.electronAPI?.readReferenceFile(fileName).then((res) => {
+      if (res.ok && res.data) {
+        const tree = parseMdToStructure(res.data, profile.folders);
+        onAiStructure(tree, profile.name);
+      }
+    });
+  }
+
   function templateBtn(profile: TemplateProfile, isJob: boolean) {
     const isActive = activeProfileName === profile.name;
     const base = isJob
@@ -1072,8 +1325,12 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
     const active_ = isJob
       ? { border: "1px solid #7c3aed", background: "#ede9fe", color: "#4c1d95", fontWeight: 700 }
       : { border: "1px solid #2563eb", background: "#dbeafe", color: "#1e40af", fontWeight: 700 };
+
     return (
-      <button key={profile.name} onClick={() => applyTemplate(profile)}
+      <button key={profile.name} onClick={() => {
+          applyTemplate(profile);
+          if (isJob) loadAiStructure(profile);
+        }}
         style={{ padding: "2px 9px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontFamily: "inherit",
           ...(isActive ? active_ : base) }}>
         {profile.name}
@@ -1095,7 +1352,10 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
               {activeProfileName}
             </span>
           )}
-          <span style={{ fontSize: 11, color: "#9ca3af" }}>총 {plans.length}개 · 이동 {active}개 · 건너뜀 {plans.length - active}개</span>
+          <span style={{ fontSize: 11, color: "#9ca3af" }}>
+            총 {filteredPlans.length}개 · 이동 {active}개 · 건너뜀 {filteredPlans.length - active}개
+            {searchQuery && <span style={{ color: "#d97706", marginLeft: 6 }}>🔍 필터: "{searchQuery}" ({filteredPlans.length}/{plans.length})</span>}
+          </span>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={onCancel} disabled={executing}
@@ -1154,9 +1414,21 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
           </div>
         </div>
 
-        {/* 화살표 */}
-        <div style={{ width: 32, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f9fafb", color: "#9ca3af", fontSize: 18 }}>
-          <span>→</span>
+        {/* ← 제외 버튼 */}
+        <div
+          onClick={handleExcludeSelected}
+          title={selectedAfterFile ? "선택된 파일을 정리 대상에서 제외" : "정리 후 상태에서 파일을 선택하세요"}
+          style={{
+            width: 32, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            background: selectedAfterFile ? "#dbeafe" : "#f9fafb",
+            color: selectedAfterFile ? "#2563eb" : "#9ca3af",
+            fontSize: 18, cursor: selectedAfterFile ? "pointer" : "default",
+            transition: "background 0.15s, color 0.15s",
+          }}
+          onMouseEnter={(e) => { if (selectedAfterFile) (e.currentTarget as HTMLElement).style.background = "#bfdbfe"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = selectedAfterFile ? "#dbeafe" : "#f9fafb"; }}
+        >
+          <span>←</span>
         </div>
 
         {/* 오른쪽: 정리 후 상태 */}
@@ -1178,7 +1450,8 @@ export default function SmartOrganizeView({ folder, onCancel, onRefresh }: Props
               dragSrcPath={dragSrcPath} dropTarget={dropTarget}
               editing={editing} editVal={editVal}
               onStartEdit={startEdit} onEditChange={setEditVal} onCommitEdit={commitEdit} onCancelEdit={cancelEdit}
-              planIndex={planIndex} plans={plans} />
+              planIndex={planIndex} plans={plans}
+              selectedFile={selectedAfterFile} onSelectFile={setSelectedAfterFile} />
           </div>
         </div>
 

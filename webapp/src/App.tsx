@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import TitleBar from "./components/TitleBar";
 import AddressBar from "./components/AddressBar";
 import CommandBar from "./components/CommandBar";
@@ -7,12 +7,14 @@ import FileList from "./components/FileList";
 import DetailsPane from "./components/DetailsPane";
 import StatusBar from "./components/StatusBar";
 import ContextMenu from "./components/ContextMenu";
+import type { MenuItem } from "./components/ContextMenu";
 import DateTooltip from "./components/DateTooltip";
 import AnalyzeView from "./components/views/AnalyzeView";
 import PreviewView from "./components/views/PreviewView";
 import DuplicatesView from "./components/views/DuplicatesView";
 import RenameView from "./components/views/RenameView";
-import SmartOrganizeView from "./components/views/SmartOrganizeView";
+import SmartOrganizeView, { updateFolderKeywords } from "./components/views/SmartOrganizeView";
+import type { AiStructureNode } from "./components/views/SmartOrganizeView";
 
 import {
   loadDirectory, parentDir,
@@ -58,6 +60,30 @@ function LoadingSpinner({ label }: { label: string }) {
   );
 }
 
+/* ── Error Boundary — React 렌더링 오류 시 앱 전체 크래시 방지 ── */
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 40, textAlign: "center", background: "#fff", minHeight: "100vh" }}>
+          <h2 style={{ color: "#dc2626", fontSize: 18 }}>오류가 발생했습니다</h2>
+          <p style={{ color: "#6b7280", fontSize: 13, margin: "12px 0" }}>{this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            style={{ padding: "8px 24px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}
+          >다시 시도</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ── Error Banner ── */
 function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
@@ -90,18 +116,33 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   /* ── UI state ── */
-  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
   const [activeView, setActiveView]     = useState<ActiveView>("explorer");
   const [watchActive, setWatchActive]   = useState(false);
   const [searchQuery, setSearchQuery]   = useState("");
   const [organizeMode, setOrganizeMode] = useState<string | null>(null);
   const [sortCol, setSortCol]           = useState<keyof FileItem>("name");
   const [sortAsc, setSortAsc]           = useState(true);
+
+  /* ── Clipboard state ── */
+  const [clipboard, setClipboard] = useState<{ mode: "copy" | "cut"; files: FileItem[] } | null>(null);
+
+  /* ── Inline rename state ── */
+  const [renamingFile, setRenamingFile] = useState<FileItem | null>(null);
+
+  /* ── Delete confirmation modal ── */
+  const [deleteConfirm, setDeleteConfirm] = useState<{ files: FileItem[] } | null>(null);
+
+  /* (newFolderMode 제거 — handleNewFolder에서 직접 생성+이름편집) */
   const [contextMenu, setContextMenu]   = useState<ContextMenuState | null>(null);
   const [tooltip, setTooltip]           = useState<TooltipState | null>(null);
   const [navWidth, setNavWidth]         = useState(220);
   const [detailOpen, setDetailOpen]     = useState(true);
+  const [detailWidth, setDetailWidth]   = useState(260);
   const [refreshKey, setRefreshKey]     = useState(0);
+  const [aiStructure, setAiStructure]   = useState<AiStructureNode[] | null>(null);
+  const [aiProfileName, setAiProfileName] = useState<string | null>(null);
+  const smartReapplyRef = useRef<(() => void) | null>(null);
 
   /* ── CLI data states ── */
   const [analyzeData, setAnalyzeData]     = useState<AnalysisData | null>(null);
@@ -120,39 +161,88 @@ export default function App() {
   const [renameBusy, setRenameBusy]       = useState(false);
   const [renameError, setRenameError]     = useState<string | null>(null);
 
+  /* ── File search state (하위폴더 포함 재귀 검색) ── */
+  interface SearchResult { name: string; path: string; size: string; sizeBytes: number; modified: string; created: string; accessed: string; icon: string; }
+  const [fileSearchResults, setFileSearchResults] = useState<SearchResult[] | null>(null);
+  const [fileSearchBusy, setFileSearchBusy] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
+
+  /* ── Filter/Search reset key (탭 전환 시 자식 컴포넌트 로컬 state 초기화용) ── */
+  const [filterResetKey, setFilterResetKey] = useState(0);
+
   /* ── Modal state ── */
   const [modal, setModal] = useState<{ title: string; message: string } | null>(null);
 
+  /* ── Zoom state (80~150%, step 10) ── */
+  const [zoom, setZoom] = useState(100);
+  const handleZoomIn = useCallback(() => setZoom((z) => Math.min(z + 10, 150)), []);
+  const handleZoomOut = useCallback(() => setZoom((z) => Math.max(z - 10, 80)), []);
+
   /* ── Load directory contents ── */
-  const fetchDir = useCallback(async (path: string) => {
-    if (!path) return;
+  const fetchDir = useCallback(async (path: string): Promise<FileItem[] | null> => {
+    if (!path) return null;
     setLoading(true);
-    setSelectedFile(null);
+    setSelectedFiles([]);
+    setRenamingFile(null);
     try {
       const items = await loadDirectory(path);
       setFiles(items);
+      return items;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  /* ── Load saved config on mount ── */
+  /* ── Load saved config on mount + 마지막 상태 복원 ── */
   useEffect(() => {
-    window.electronAPI?.loadConfig().then((saved: ManagedFolder[]) => {
-      if (Array.isArray(saved) && saved.length > 0) {
-        setFolders(saved);
-        const first = saved[0];
-        setActiveFolder(first);
-        setCurrentPath(first.path);
-        fetchDir(first.path);
-        // watching 상태 복원
-        saved.filter((f) => f.watching).forEach((f) => {
-          window.electronAPI?.watchStart(f.path);
-        });
-        if (first.watching) setWatchActive(true);
+    window.electronAPI?.loadConfig().then(async (saved: ManagedFolder[]) => {
+      if (!Array.isArray(saved) || saved.length === 0) return;
+      setFolders(saved);
+
+      // watching 상태 복원
+      saved.filter((f) => f.watching).forEach((f) => {
+        window.electronAPI?.watchStart(f.path);
+      });
+
+      // 마지막 탐색 상태 복원 시도
+      const lastState = await window.electronAPI?.loadLastState();
+      if (lastState?.folderPath) {
+        const matched = saved.find((f) => f.path === lastState.folderPath);
+        if (matched) {
+          setActiveFolder(matched);
+          if (matched.watching) setWatchActive(true);
+          // 마지막 탐색 경로 복원 (해당 관리폴더 하위인지 확인)
+          const restorePath = lastState.currentPath || matched.path;
+          setCurrentPath(restorePath);
+          const dirFiles = await fetchDir(restorePath);
+          // 마지막 선택 파일 복원
+          if (lastState.selectedFile && dirFiles) {
+            const found = dirFiles.find((f: FileItem) => f.path === lastState.selectedFile);
+            if (found) setSelectedFiles([found]);
+          }
+          return;
+        }
       }
+
+      // 마지막 상태가 없으면 첫 번째 폴더 열기
+      const first = saved[0];
+      setActiveFolder(first);
+      setCurrentPath(first.path);
+      fetchDir(first.path);
+      if (first.watching) setWatchActive(true);
     });
   }, [fetchDir]);
+
+  /* ── 마지막 탐색 상태 자동 저장 (경로·폴더·선택파일 변경 시) ── */
+  useEffect(() => {
+    if (!currentPath || !activeFolder) return;
+    const sel = selectedFiles.length === 1 ? selectedFiles[0].path : null;
+    window.electronAPI?.saveLastState({
+      folderPath: activeFolder.path,
+      currentPath,
+      selectedFile: sel,
+    });
+  }, [currentPath, activeFolder, selectedFiles]);
 
   /* ── View change triggers CLI calls ── */
   useEffect(() => {
@@ -437,7 +527,7 @@ export default function App() {
 
   /* ── Filtered + sorted file list ── */
   const filteredFiles = files
-    .filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter((f) => !searchQuery || (f.name ?? "").toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
       // Folders always first
       if (a.category === "folder" && b.category !== "folder") return -1;
@@ -458,10 +548,206 @@ export default function App() {
     else { setSortCol(col); setSortAsc(true); }
   }
 
+  // 다중 선택 핸들러 (Ctrl+클릭, Shift+클릭)
+  function handleSelect(file: FileItem, e: React.MouseEvent | React.KeyboardEvent) {
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const isShift = e.shiftKey;
+
+    if (isCtrl) {
+      // Ctrl+클릭: 토글
+      setSelectedFiles((prev) => {
+        const exists = prev.find((f) => f.path === file.path);
+        return exists ? prev.filter((f) => f.path !== file.path) : [...prev, file];
+      });
+    } else if (isShift && selectedFiles.length > 0) {
+      // Shift+클릭: 범위 선택
+      const lastSelected = selectedFiles[selectedFiles.length - 1];
+      const startIdx = filteredFiles.findIndex((f) => f.path === lastSelected.path);
+      const endIdx = filteredFiles.findIndex((f) => f.path === file.path);
+      if (startIdx >= 0 && endIdx >= 0) {
+        const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+        setSelectedFiles(filteredFiles.slice(from, to + 1));
+      }
+    } else {
+      setSelectedFiles([file]);
+    }
+  }
+
+  function handleSelectAll() {
+    setSelectedFiles([...filteredFiles]);
+  }
+
   function handleSetView(v: ActiveView) {
     setActiveView(v);
-    if (v !== "explorer") setSelectedFile(null);
+    if (v !== "explorer") setSelectedFiles([]);
+    // 탭 전환 시 필터·검색 상태 초기화
+    setSearchQuery("");
+    setFileSearchResults(null);
+    setFileSearchQuery("");
+    setFileSearchBusy(false);
+    setFilterResetKey((k) => k + 1);
   }
+
+  /* ── Clipboard operations ── */
+  function handleCopy() {
+    if (selectedFiles.length > 0) setClipboard({ mode: "copy", files: [...selectedFiles] });
+  }
+  function handleCut() {
+    if (selectedFiles.length > 0) setClipboard({ mode: "cut", files: [...selectedFiles] });
+  }
+  async function handlePaste() {
+    if (!clipboard || !currentPath) return;
+    const errors: string[] = [];
+    for (const file of clipboard.files) {
+      const api = clipboard.mode === "cut"
+        ? window.electronAPI?.moveFile(file.path, currentPath)
+        : window.electronAPI?.copyFileTo(file.path, currentPath);
+      const res = await api;
+      if (!res?.ok) errors.push(`${file.name}: ${res?.error ?? "실패"}`);
+    }
+    if (clipboard.mode === "cut") setClipboard(null); // 잘라내기는 1회용
+    if (errors.length > 0) setModal({ title: "붙여넣기 오류", message: errors.join("\n") });
+    fetchDir(currentPath);
+  }
+
+  /* ── Delete with confirmation ── */
+  function requestDelete(files: FileItem[]) {
+    if (files.length === 0) return;
+    setDeleteConfirm({ files });
+  }
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    const root = activeFolder?.path ?? currentPath;
+    const errors: string[] = [];
+    for (const file of deleteConfirm.files) {
+      const res = await window.electronAPI?.moveToDeleteBin(file.path, root);
+      if (!res?.ok) errors.push(`${file.name}: ${res?.error ?? "실패"}`);
+    }
+    // 삭제된 파일을 선택에서 제거
+    const deletedPaths = new Set(deleteConfirm.files.map((f) => f.path));
+    setSelectedFiles((prev) => prev.filter((f) => !deletedPaths.has(f.path)));
+    // 잘라내기 클립보드에서도 제거
+    if (clipboard?.mode === "cut") {
+      setClipboard((prev) => {
+        if (!prev) return null;
+        const remaining = prev.files.filter((f) => !deletedPaths.has(f.path));
+        return remaining.length > 0 ? { ...prev, files: remaining } : null;
+      });
+    }
+    setDeleteConfirm(null);
+    if (errors.length > 0) setModal({ title: "삭제 오류", message: errors.join("\n") });
+    if (currentPath) fetchDir(currentPath);
+  }
+
+  /* ── New folder creation ── */
+  async function handleNewFolder() {
+    if (!currentPath) return;
+    // 고유한 이름 생성
+    let name = "새 폴더";
+    let counter = 1;
+    const existingNames = new Set(files.map((f) => f.name));
+    while (existingNames.has(name)) {
+      name = `새 폴더 (${counter})`;
+      counter++;
+    }
+    const res = await window.electronAPI?.createFolders(currentPath, [name]);
+    if (res?.ok) {
+      await fetchDir(currentPath);
+      // 새 폴더를 선택하고 이름 편집 모드 진입
+      const newFiles = await loadDirectory(currentPath);
+      setFiles(newFiles);
+      const created = newFiles.find((f) => f.name === name);
+      if (created) {
+        setSelectedFiles([created]);
+        setRenamingFile(created);
+      }
+    } else {
+      setModal({ title: "폴더 생성 실패", message: res?.error ?? "알 수 없는 오류" });
+    }
+  }
+
+  /* ── File search (하위폴더 포함 재귀 검색) ── */
+  async function handleFileSearch(query: string) {
+    if (!currentPath || !query.trim()) return;
+    setFileSearchBusy(true);
+    setFileSearchQuery(query.trim());
+    setFileSearchResults(null);
+    try {
+      const res = await window.electronAPI?.readDirRecursive(currentPath);
+      if (res?.ok && res.data) {
+        const q = query.trim().toLowerCase();
+        const fmtDate = (iso: string) => {
+          if (!iso) return "";
+          const d = new Date(iso);
+          const y = d.getFullYear();
+          const M = String(d.getMonth() + 1).padStart(2, "0");
+          const D = String(d.getDate()).padStart(2, "0");
+          const h = String(d.getHours()).padStart(2, "0");
+          const m = String(d.getMinutes()).padStart(2, "0");
+          return `${y}.${M}.${D} ${h}:${m}`;
+        };
+        const fmtSize = (s: number) =>
+          s > 1048576 ? `${(s / 1048576).toFixed(1)} MB`
+          : s > 1024 ? `${(s / 1024).toFixed(1)} KB`
+          : `${s} B`;
+        const matched: SearchResult[] = res.data
+          .filter((f: { name: string }) => f.name.toLowerCase().includes(q))
+          .map((f: { name: string; path: string; size: number; modified: string; created: string; accessed?: string }) => ({
+            name: f.name,
+            path: f.path,
+            size: fmtSize(f.size),
+            sizeBytes: f.size,
+            modified: fmtDate(f.modified),
+            created: fmtDate(f.created),
+            accessed: fmtDate(f.accessed ?? ""),
+            icon: "📄",
+          }));
+        setFileSearchResults(matched);
+      }
+    } catch (err) {
+      setModal({ title: "검색 오류", message: String(err) });
+    } finally {
+      setFileSearchBusy(false);
+    }
+  }
+
+  /* ── Inline rename handler ── */
+  async function handleRenameCommit(file: FileItem, newName: string) {
+    const res = await window.electronAPI?.renameFile(file.path, newName);
+    if (res?.ok) {
+      setRenamingFile(null);
+      if (currentPath) fetchDir(currentPath);
+    } else {
+      setModal({ title: "이름 바꾸기 실패", message: res?.error ?? "알 수 없는 오류" });
+    }
+  }
+
+  /* ── Global keyboard shortcuts ── */
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      // input/textarea에서는 무시
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (activeView !== "explorer") return;
+
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      if (ctrl && e.key === "c") { e.preventDefault(); handleCopy(); }
+      if (ctrl && e.key === "x") { e.preventDefault(); handleCut(); }
+      if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); }
+      if (ctrl && e.key === "z") { e.preventDefault(); handleUndo(); }
+      if (e.key === "Delete") { e.preventDefault(); requestDelete(selectedFiles); }
+      if (e.key === "F2" && selectedFiles.length === 1) { e.preventDefault(); setRenamingFile(selectedFiles[0]); }
+      if (e.key === "F5") { e.preventDefault(); if (currentPath) fetchDir(currentPath); }
+      if (e.key === "Backspace") { e.preventDefault(); goUp(); }
+      if (ctrl && e.shiftKey && e.key === "N") { e.preventDefault(); handleNewFolder(); }
+      if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); goBack(); }
+      if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); goForward(); }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFiles, currentPath, activeView, clipboard]);
 
   /* ── Nav pane resize drag ── */
   function startNavResize(e: React.MouseEvent) {
@@ -488,14 +774,16 @@ export default function App() {
   };
 
   return (
+    <ErrorBoundary>
     <div
-      style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "Segoe UI, Malgun Gothic, sans-serif", fontSize: 13, color: "#1a1a1a", background: "#f3f3f3", overflow: "hidden" }}
+      style={{ display: "flex", flexDirection: "column", height: `${10000 / zoom}vh`, width: `${10000 / zoom}vw`, fontFamily: "Segoe UI, Malgun Gothic, sans-serif", fontSize: 13, color: "#1a1a1a", background: "#f3f3f3", overflow: "hidden", transform: `scale(${zoom / 100})`, transformOrigin: "top left" }}
       onClick={() => { setContextMenu(null); setTooltip(null); }}
     >
       <TitleBar />
 
       <AddressBar
         currentPath={currentPath}
+        managedPaths={folders.map((f) => f.path)}
         canGoBack={backStack.length > 0}
         canGoForward={fwdStack.length > 0}
         canGoUp={!!currentPath && parentDir(currentPath) !== currentPath}
@@ -504,21 +792,22 @@ export default function App() {
         onUp={goUp}
         onNavigate={navigate}
         onSearch={setSearchQuery}
+        zoom={zoom}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        activeView={activeView}
+        resetKey={filterResetKey}
       />
 
       <CommandBar
         activeView={activeView}
         watchActive={watchActive}
         onSetView={handleSetView}
-        onOrganizeMode={(mode) => {
-          setOrganizeMode(mode);
-          // 이미 preview 뷰면 새 dry-run 즉시 호출
-          if (activeView === "preview") {
-            loadOrganizePreview(mode);
-          }
-        }}
         onToggleWatch={handleWatchToggle}
         onUndo={handleUndo}
+        onFileSearch={handleFileSearch}
+        searchBusy={fileSearchBusy}
+        resetKey={filterResetKey}
       />
 
       {/* Body */}
@@ -555,19 +844,116 @@ export default function App() {
             </div>
           )}
 
-          {currentPath && activeView === "explorer" && (
+          {currentPath && (activeView === "explorer") && !fileSearchResults && (
             <FileList
               files={filteredFiles}
-              selected={selectedFile}
+              selectedFiles={selectedFiles}
               sortCol={sortCol}
               sortAsc={sortAsc}
               loading={loading}
+              renamingFile={renamingFile}
               onSort={handleSort}
-              onSelect={setSelectedFile}
+              onSelect={handleSelect}
+              onSelectAll={handleSelectAll}
               onNavigate={navigate}
               onContextMenu={(file, x, y) => setContextMenu({ file, x, y })}
               onTooltip={(file, x, y) => setTooltip(file ? { file, x, y } : null)}
+              onRenameCommit={handleRenameCommit}
+              onRenameCancel={() => setRenamingFile(null)}
             />
+          )}
+
+          {/* 파일 검색 결과 패널 */}
+          {currentPath && (activeView === "explorer" || activeView === "smart") && fileSearchResults && (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              {/* 검색 결과 헤더 */}
+              <div style={{
+                padding: "8px 14px", background: "#eff6ff", borderBottom: "1px solid #bfdbfe",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>🔎</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8" }}>
+                    "{fileSearchQuery}" 검색 결과
+                  </span>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>
+                    — {fileSearchResults.length}개 파일 발견
+                  </span>
+                </div>
+                <button
+                  onClick={() => { setFileSearchResults(null); setFileSearchQuery(""); }}
+                  style={{
+                    padding: "3px 12px", border: "1px solid #93c5fd", borderRadius: 4,
+                    background: "#dbeafe", color: "#1d4ed8", cursor: "pointer",
+                    fontSize: 12, fontFamily: "inherit", fontWeight: 600,
+                  }}
+                >
+                  닫기 ✕
+                </button>
+              </div>
+              {/* 검색 결과 목록 */}
+              <div style={{ flex: 1, overflow: "auto", userSelect: "none" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "#fafafa", borderBottom: "1px solid #e8e8e8", position: "sticky", top: 0, zIndex: 10 }}>
+                      <th style={{ padding: "7px 10px", textAlign: "left", fontWeight: 500, color: "#555", fontSize: 12 }}>파일명</th>
+                      <th style={{ padding: "7px 10px", textAlign: "left", fontWeight: 500, color: "#555", fontSize: 12, width: 130 }}>수정한 날짜</th>
+                      <th style={{ padding: "7px 10px", textAlign: "left", fontWeight: 500, color: "#555", fontSize: 12, width: 130 }}>만든 날짜</th>
+                      <th style={{ padding: "7px 10px", textAlign: "left", fontWeight: 500, color: "#555", fontSize: 12, width: 130 }}>액세스 날짜</th>
+                      <th style={{ padding: "7px 10px", textAlign: "right", fontWeight: 500, color: "#555", fontSize: 12, width: 80 }}>크기</th>
+                      <th style={{ padding: "7px 10px", textAlign: "left", fontWeight: 500, color: "#555", fontSize: 12, width: 240 }}>상대 경로</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fileSearchResults.map((f) => {
+                      const relPath = f.path.replace(/\\/g, "/");
+                      const basePath = currentPath.replace(/\\/g, "/");
+                      const rel = relPath.startsWith(basePath)
+                        ? relPath.slice(basePath.length).replace(/^\//, "").replace(/\/[^/]+$/, "")
+                        : f.path.replace(/[\\/][^\\/]+$/, "");
+                      return (
+                        <tr
+                          key={f.path}
+                          style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f0f7ff"; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                          onDoubleClick={() => window.electronAPI?.openPath(f.path)}
+                          onClick={() => {
+                            const parentPath = f.path.replace(/[\\/][^\\/]+$/, "");
+                            if (parentPath) {
+                              setFileSearchResults(null);
+                              setFileSearchQuery("");
+                              navigate(parentPath);
+                            }
+                          }}
+                        >
+                          <td style={{ padding: "5px 10px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                              <span style={{ fontSize: 16, flexShrink: 0 }}>{f.icon}</span>
+                              <span style={{ color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: "5px 10px", color: "#555", whiteSpace: "nowrap", fontSize: 11 }}>{f.modified}</td>
+                          <td style={{ padding: "5px 10px", color: "#555", whiteSpace: "nowrap", fontSize: 11 }}>{f.created}</td>
+                          <td style={{ padding: "5px 10px", color: "#555", whiteSpace: "nowrap", fontSize: 11 }}>{f.accessed}</td>
+                          <td style={{ padding: "5px 10px", color: "#555", textAlign: "right", whiteSpace: "nowrap", fontSize: 12 }}>{f.size}</td>
+                          <td style={{ padding: "5px 10px", color: "#9ca3af", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 240 }} title={rel}>
+                            {rel || "."}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {fileSearchResults.length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>
+                          검색 결과가 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
           {currentPath && activeView === "analyze" && (
@@ -605,11 +991,14 @@ export default function App() {
             renameData ? <RenameView plans={renameData} loading={renameBusy} onRefresh={loadRenamePreview} onExecute={handleRenameExecute} onCancel={() => handleSetView("explorer")} /> : null
           )}
 
-          {activeView === "smart" && activeFolder && (
+          {activeView === "smart" && activeFolder && !fileSearchResults && (
             <SmartOrganizeView
-              folder={activeFolder}
-              onCancel={() => handleSetView("explorer")}
+              folder={{ ...activeFolder, label: labelFromPath(currentPath) || activeFolder.label, path: currentPath || activeFolder.path }}
+              searchQuery={searchQuery}
+              onCancel={() => { handleSetView("explorer"); setAiStructure(null); setAiProfileName(null); }}
               onRefresh={() => { if (currentPath) fetchDir(currentPath); setRefreshKey((k) => k + 1); }}
+              onAiStructure={(data, name) => { setAiStructure(data); setAiProfileName(name); setDetailOpen(true); }}
+              onRegisterReapply={(fn) => { smartReapplyRef.current = fn; }}
             />
           )}
         </div>
@@ -617,19 +1006,44 @@ export default function App() {
         {/* Details Pane */}
         {detailOpen && currentPath && (
           <DetailsPane
-            file={selectedFile}
+            file={selectedFiles.length === 1 ? selectedFiles[0] : null}
             folder={displayFolder}
             onClose={() => setDetailOpen(false)}
             onSetView={handleSetView}
             onToggleWatch={handleWatchToggle}
             onRefresh={() => { if (currentPath) fetchDir(currentPath); setRefreshKey((k) => k + 1); }}
+            activeView={activeView}
+            aiStructure={aiStructure}
+            aiProfileName={aiProfileName}
+            width={detailWidth}
+            onWidthChange={setDetailWidth}
+            onKeywordSave={(folderName, keywords) => {
+              if (aiProfileName) {
+                updateFolderKeywords(aiProfileName, folderName, keywords);
+                // AI추천 구조 트리의 키워드 수·목록도 즉시 반영
+                if (aiStructure) {
+                  const updateNode = (nodes: AiStructureNode[]): AiStructureNode[] =>
+                    nodes.map((n) => {
+                      if (n.name === folderName) {
+                        return { ...n, keywords: [...keywords], keywordCount: keywords.length };
+                      }
+                      if (n.children.length > 0) {
+                        return { ...n, children: updateNode(n.children) };
+                      }
+                      return n;
+                    });
+                  setAiStructure(updateNode(aiStructure));
+                }
+                smartReapplyRef.current?.();
+              }
+            }}
           />
         )}
         {(!detailOpen || !currentPath) && detailOpen && currentPath && null}
         {!detailOpen && (
           <button
             onClick={() => setDetailOpen(true)}
-            title="세부 정보 열기"
+            title={activeView === "smart" ? "AI추천 구조 열기" : "세부 정보 열기"}
             style={{ width: 20, background: "#f0f0f0", border: "none", borderLeft: "1px solid #ddd", cursor: "pointer", color: "#666", fontSize: 10 }}
           >›</button>
         )}
@@ -637,37 +1051,61 @@ export default function App() {
 
       <StatusBar
         totalFiles={filteredFiles.length}
-        selected={selectedFile}
+        selectedFiles={selectedFiles}
         activeFolder={displayFolder}
         watchActive={watchActive}
+        clipboardMode={clipboard?.mode}
+        clipboardCount={clipboard?.files.length}
       />
 
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x} y={contextMenu.y}
-          items={[
+          items={contextMenu.file ? [
+            // 파일/폴더 위에서 우클릭
             { icon: "📂", label: "열기", action: "open" },
             { icon: "✏️", label: "이름 바꾸기", action: "rename" },
-            { icon: "📋", label: "복사", action: "copy" },
-            { icon: "✂️", label: "잘라내기", action: "cut" },
+            null,
+            { icon: "📋", label: "복사                    Ctrl+C", action: "copy" },
+            { icon: "✂️", label: "잘라내기             Ctrl+X", action: "cut" },
             null,
             { icon: "📁", label: "관리폴더로 이동", action: "move-to-folder",
               subItems: folders.map((f) => ({ icon: "📁", label: f.label, action: `move-to:${f.path}` })),
             },
             null,
-            { icon: "🗑️", label: "삭제", action: "delete" },
+            { icon: "🗑️", label: "삭제                    Delete", action: "delete" },
             null,
             { icon: "ℹ️", label: "속성", action: "properties" },
+          ] : [
+            // 빈 영역 우클릭
+            { icon: "📁", label: "새 폴더           Ctrl+Shift+N", action: "new-folder" },
+            ...(clipboard ? [
+              null as MenuItem | null,
+              { icon: "📋", label: `붙여넣기             Ctrl+V  (${clipboard.files.length}개)`, action: "paste" },
+            ] : []),
+            null,
+            { icon: "🔄", label: "새로고침                       F5", action: "refresh" },
           ]}
           onClose={() => setContextMenu(null)}
           onAction={(action) => {
             const file = contextMenu.file;
             setContextMenu(null);
+
+            // 빈 영역 메뉴 동작
+            if (action === "new-folder") { handleNewFolder(); return; }
+            if (action === "paste") { handlePaste(); return; }
+            if (action === "refresh") { if (currentPath) fetchDir(currentPath); return; }
+
             if (!file) return;
+
+            // 다중 선택 시 선택된 파일 목록 사용
+            const targetFiles = selectedFiles.find((f) => f.path === file.path)
+              ? selectedFiles : [file];
 
             if (action.startsWith("move-to:")) {
               const targetFolder = action.slice("move-to:".length);
-              window.electronAPI?.organizeCustom([{ source: file.path, destFolder: targetFolder }]).then((res) => {
+              const moves = targetFiles.map((f) => ({ source: f.path, destFolder: targetFolder }));
+              window.electronAPI?.organizeCustom(moves).then((res) => {
                 if (res?.ok && res.data) {
                   const d = res.data as { moved: number; message: string };
                   setModal({ title: "파일 이동", message: d.message });
@@ -683,28 +1121,14 @@ export default function App() {
                 window.electronAPI?.openPath(file.path);
               }
             } else if (action === "rename") {
-              setSelectedFile(file);
-              setDetailOpen(true);
-              // DetailsPane이 마운트된 후 이름 변경 모드를 트리거하기 위해
-              // DetailsPane 내부의 startRename은 파일 선택 후 사용자가 직접 클릭
+              setSelectedFiles([file]);
+              setRenamingFile(file);
             } else if (action === "copy") {
-              window.electronAPI?.copyFile(file.path).then((res) => {
-                if (res?.ok) {
-                  if (currentPath) fetchDir(currentPath);
-                } else {
-                  setModal({ title: "복사 실패", message: res?.error ?? "알 수 없는 오류" });
-                }
-              });
+              setClipboard({ mode: "copy", files: [...targetFiles] });
+            } else if (action === "cut") {
+              setClipboard({ mode: "cut", files: [...targetFiles] });
             } else if (action === "delete") {
-              const root = activeFolder?.path ?? currentPath;
-              window.electronAPI?.moveToDeleteBin(file.path, root).then((res) => {
-                if (res?.ok) {
-                  if (selectedFile?.path === file.path) setSelectedFile(null);
-                  if (currentPath) fetchDir(currentPath);
-                } else {
-                  setModal({ title: "삭제 실패", message: res?.error ?? "알 수 없는 오류" });
-                }
-              });
+              requestDelete(targetFiles);
             } else if (action === "properties") {
               const parentPath = file.path.replace(/[\\/][^\\/]+$/, "") || file.path;
               window.electronAPI?.openPath(parentPath);
@@ -716,10 +1140,38 @@ export default function App() {
         <DateTooltip file={tooltip.file} x={tooltip.x} y={tooltip.y} />
       )}
 
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }} onClick={() => setDeleteConfirm(null)}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "24px 28px", minWidth: 340, maxWidth: 480, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 12px 0", fontSize: 15, fontWeight: 700 }}>삭제 확인</h3>
+            <p style={{ margin: "0 0 8px 0", fontSize: 13, color: "#374151", lineHeight: 1.5 }}>
+              {deleteConfirm.files.length === 1
+                ? `"${deleteConfirm.files[0].name}"을(를) 삭제대상으로 이동하시겠습니까?`
+                : `${deleteConfirm.files.length}개 항목을 삭제대상으로 이동하시겠습니까?`}
+            </p>
+            {deleteConfirm.files.length > 1 && deleteConfirm.files.length <= 10 && (
+              <ul style={{ margin: "0 0 12px 0", padding: "0 0 0 20px", fontSize: 12, color: "#6b7280", lineHeight: 1.6 }}>
+                {deleteConfirm.files.map((f) => <li key={f.path}>{f.name}</li>)}
+              </ul>
+            )}
+            <div style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setDeleteConfirm(null)} style={{ padding: "7px 20px", background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                취소
+              </button>
+              <button onClick={confirmDelete} style={{ padding: "7px 20px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 600 }}>
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Result Modal */}
       {modal && (
         <ResultModal title={modal.title} message={modal.message} onClose={() => setModal(null)} />
       )}
     </div>
+    </ErrorBoundary>
   );
 }

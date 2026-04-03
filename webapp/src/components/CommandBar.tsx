@@ -1,27 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ActiveView } from "../types";
 
 interface Props {
   activeView: ActiveView;
   watchActive: boolean;
   onSetView: (v: ActiveView) => void;
-  onOrganizeMode: (mode: string) => void;
   onToggleWatch: () => void;
   onUndo: () => void;
+  onFileSearch: (query: string) => void;
+  searchBusy?: boolean;
+  resetKey?: number;
 }
 
-const ORGANIZE_MODES = [
-  { icon: "📁", label: "타입별 정리",        mode: "by-type" },
-  { icon: "📅", label: "날짜별 정리",        mode: "by-date" },
-  null,
-  { icon: "⚙️", label: "커스텀 규칙으로 정리…", mode: "custom" },
-];
-
 function CmdBtn({
-  icon, label, active, hasMenu, badge, onClick,
+  icon, label, active, badge, onClick,
 }: {
   icon: string; label: string; active?: boolean;
-  hasMenu?: boolean; badge?: React.ReactNode; onClick: () => void;
+  badge?: React.ReactNode; onClick: () => void;
 }) {
   const [hov, setHov] = useState(false);
   return (
@@ -41,14 +36,27 @@ function CmdBtn({
     >
       <span style={{ fontSize: 14 }}>{icon}</span>
       <span>{label}</span>
-      {hasMenu && <span style={{ fontSize: 8, opacity: 0.7 }}>▼</span>}
       {badge}
     </button>
   );
 }
 
-export default function CommandBar({ activeView, watchActive, onSetView, onOrganizeMode, onToggleWatch, onUndo }: Props) {
-  const [organizeOpen, setOrganizeOpen] = useState(false);
+export default function CommandBar({ activeView, watchActive, onSetView, onToggleWatch, onUndo, onFileSearch, searchBusy, resetKey = 0 }: Props) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchVal, setSearchVal] = useState("");
+
+  // 탭 전환 시 검색 입력 초기화
+  useEffect(() => {
+    setSearchOpen(false);
+    setSearchVal("");
+  }, [resetKey]);
+
+  const showSearch = activeView === "explorer" || activeView === "smart";
+
+  function submitSearch() {
+    const q = searchVal.trim();
+    if (q) onFileSearch(q);
+  }
 
   return (
     <div
@@ -57,57 +65,13 @@ export default function CommandBar({ activeView, watchActive, onSetView, onOrgan
         display: "flex", alignItems: "center", gap: 1,
         borderBottom: "1px solid #e8e8e8", flexWrap: "wrap",
       }}
-      onClick={() => setOrganizeOpen(false)}
     >
-      {/* 정리 (with dropdown) */}
-      <div style={{ position: "relative" }}>
-        <CmdBtn
-          icon="🗂️" label="정리" hasMenu
-          active={activeView === "preview"}
-          onClick={(e?: React.MouseEvent) => { e?.stopPropagation(); setOrganizeOpen((p) => !p); }}
-        />
-        {organizeOpen && (
-          <div
-            style={{
-              position: "absolute", top: "100%", left: 0,
-              background: "#fff", borderRadius: 8,
-              boxShadow: "0 6px 24px rgba(0,0,0,0.14)",
-              border: "1px solid #e0e0e0", padding: "4px 0",
-              zIndex: 200, minWidth: 190,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {ORGANIZE_MODES.map((m, i) =>
-              m === null ? (
-                <div key={i} style={{ height: 1, background: "#eee", margin: "4px 10px" }} />
-              ) : (
-                <button
-                  key={i}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 9,
-                    padding: "7px 14px", border: "none", background: "transparent",
-                    cursor: "pointer", width: "100%", fontSize: 12,
-                    fontFamily: "inherit", textAlign: "left", color: "#333",
-                  }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#f0f7ff")}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-                  onClick={() => { onOrganizeMode(m.mode); onSetView("preview"); setOrganizeOpen(false); }}
-                >
-                  <span style={{ fontSize: 15 }}>{m.icon}</span>
-                  <span>{m.label}</span>
-                </button>
-              )
-            )}
-          </div>
-        )}
-      </div>
-
+      <CmdBtn icon="⭐" label="폴더 즐겨찾기" active={activeView === "explorer"} onClick={() => onSetView("explorer")} />
       <CmdBtn icon="✨" label="스마트 정리" active={activeView === "smart"}      onClick={() => onSetView(activeView === "smart"      ? "explorer" : "smart")} />
       <CmdBtn icon="📊" label="분석"       active={activeView === "analyze"}    onClick={() => onSetView(activeView === "analyze"    ? "explorer" : "analyze")} />
       <CmdBtn icon="✏️"  label="리네임"    active={activeView === "rename"}     onClick={() => onSetView(activeView === "rename"     ? "explorer" : "rename")} />
       <CmdBtn icon="🔍" label="중복검사"   active={activeView === "duplicates"} onClick={() => onSetView(activeView === "duplicates" ? "explorer" : "duplicates")} />
 
-      {/* Separator */}
       <div style={{ width: 1, height: 22, background: "#ddd", margin: "0 4px" }} />
 
       <CmdBtn
@@ -120,6 +84,64 @@ export default function CommandBar({ activeView, watchActive, onSetView, onOrgan
         onClick={onToggleWatch}
       />
       <CmdBtn icon="↩️" label="되돌리기" onClick={onUndo} />
+
+      {/* 파일 검색 — 폴더 즐겨찾기/스마트 정리 탭에서만 표시 */}
+      {showSearch && (
+        <>
+        <div style={{ width: 1, height: 22, background: "#ddd", margin: "0 4px" }} />
+
+        <CmdBtn
+          icon="🔎" label="파일 검색"
+          active={searchOpen}
+          onClick={() => { setSearchOpen((p) => !p); if (searchOpen) { setSearchVal(""); } }}
+        />
+        </>
+      )}
+
+      {/* 파일 검색 입력 (확장 영역) */}
+      {showSearch && searchOpen && (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+          <div style={{
+            display: "flex", alignItems: "center",
+            background: "#fff", borderRadius: 4, padding: "3px 8px",
+            border: "1px solid #2563eb", gap: 4, width: 220,
+          }}>
+            <input
+              autoFocus
+              placeholder="파일명 입력 후 Enter (하위폴더 포함)"
+              value={searchVal}
+              onChange={(e) => setSearchVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitSearch();
+                if (e.key === "Escape") { setSearchOpen(false); setSearchVal(""); }
+              }}
+              style={{
+                border: "none", background: "transparent", outline: "none",
+                fontSize: 12, width: "100%", fontFamily: "inherit",
+              }}
+            />
+            {searchVal && (
+              <button
+                onClick={() => setSearchVal("")}
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: "#999", padding: 0, fontSize: 12 }}
+              >✕</button>
+            )}
+          </div>
+          <button
+            onClick={submitSearch}
+            disabled={!searchVal.trim() || searchBusy}
+            style={{
+              padding: "4px 10px", border: "none", borderRadius: 4,
+              background: searchVal.trim() ? "#2563eb" : "#e5e7eb",
+              color: searchVal.trim() ? "#fff" : "#9ca3af",
+              cursor: searchVal.trim() ? "pointer" : "default",
+              fontSize: 12, fontFamily: "inherit", fontWeight: 600,
+            }}
+          >
+            {searchBusy ? "검색 중..." : "검색"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -135,7 +135,7 @@ export interface WatchEvent {
 export interface ContextMenuState {
   x: number;
   y: number;
-  file: FileItem;
+  file: FileItem | null;
 }
 
 export interface TooltipState {
