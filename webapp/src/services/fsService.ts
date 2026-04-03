@@ -79,6 +79,9 @@ const EXT: Record<string, ExtInfo> = {
   ps1:  { category: "code", icon: "💻", type: "PowerShell 스크립트" },
   sql:  { category: "code", icon: "💻", type: "SQL 파일" },
   env:  { category: "code", icon: "⚙️", type: "환경 설정 파일" },
+  /* Email */
+  eml:  { category: "email", icon: "📧", type: "이메일 파일" },
+  msg:  { category: "email", icon: "📧", type: "Outlook 이메일" },
   /* Fonts */
   ttf:  { category: "other", icon: "🔤", type: "TrueType 폰트" },
   otf:  { category: "other", icon: "🔤", type: "OpenType 폰트" },

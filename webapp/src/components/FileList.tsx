@@ -16,6 +16,7 @@ interface Props {
   onTooltip: (f: FileItem | null, x: number, y: number) => void;
   onRenameCommit: (file: FileItem, newName: string) => void;
   onRenameCancel: () => void;
+  onOpenEml?: () => void;
 }
 
 const COLS: { key: keyof FileItem; label: string; width: number | string; align?: "right" }[] = [
@@ -27,7 +28,7 @@ const COLS: { key: keyof FileItem; label: string; width: number | string; align?
 
 export default function FileList({
   files, selectedFiles, sortCol, sortAsc, loading, renamingFile,
-  onSort, onSelect, onSelectAll, onNavigate, onContextMenu, onTooltip,
+  onSort, onSelect, onSelectAll, onNavigate, onContextMenu, onTooltip, onOpenEml,
   onRenameCommit, onRenameCancel,
 }: Props) {
   const [hovRow, setHovRow] = useState<string | null>(null);
@@ -154,6 +155,7 @@ export default function FileList({
                 onDoubleClick={() => {
                   if (renamingFile) return;
                   if (f.category === "folder") onNavigate(f.path);
+                  else if (f.category === "email" && f.name.toLowerCase().endsWith(".eml") && onOpenEml) onOpenEml();
                   else window.electronAPI?.openPath(f.path);
                 }}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(f, e.clientX, e.clientY); }}

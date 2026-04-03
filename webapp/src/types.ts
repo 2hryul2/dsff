@@ -10,7 +10,7 @@ export interface FileItem {
   size: string;          // formatted string (e.g. "1.2 MB")
   sizeBytes: number;     // raw bytes for numeric sort
   icon: string;
-  category: "folder" | "document" | "image" | "video" | "audio" | "archive" | "code" | "other";
+  category: "folder" | "document" | "image" | "video" | "audio" | "archive" | "code" | "email" | "other";
 }
 
 export interface ManagedFolder {
@@ -142,4 +142,23 @@ export interface TooltipState {
   file: FileItem;
   x: number;
   y: number;
+}
+
+/* ── EML 이메일 뷰어 관련 ── */
+export interface EmlAttachmentMeta {
+  filename: string;
+  contentType: string;
+  size: number;
+  index: number;
+}
+
+export interface EmlData {
+  from: string;
+  to: string;
+  cc: string;
+  subject: string;
+  date: string;
+  textBody: string;
+  htmlBody: string;
+  attachments: EmlAttachmentMeta[];
 }

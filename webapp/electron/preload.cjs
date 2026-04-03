@@ -58,4 +58,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   /* Reference markdown */
   readReferenceFile: (fileName) => ipcRenderer.invoke("fs:readReferenceFile", fileName),
   writeReferenceFile: (fileName, folderName, keywords) => ipcRenderer.invoke("fs:writeReferenceFile", fileName, folderName, keywords),
+
+  /* EML 이메일 파싱 */
+  parseEml: (filePath) => ipcRenderer.invoke("eml:parse", filePath),
+  extractEmlAttachment: (filePath, attachIdx) => ipcRenderer.invoke("eml:extractAttachment", filePath, attachIdx),
 });

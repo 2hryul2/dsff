@@ -1,6 +1,7 @@
 import type {
   ManagedFolder, DsffResult, AnalysisData, OrganizePlan,
   OrganizeResult, RenameResult, RenamePlan, DuplicateGroup, UndoResult,
+  EmlData,
 } from "./types";
 
 interface RawDirEntry {
@@ -66,6 +67,10 @@ declare global {
       /* Reference markdown */
       readReferenceFile: (fileName: string) => Promise<DsffResult<string>>;
       writeReferenceFile: (fileName: string, folderName: string, keywords: string[]) => Promise<DsffResult<undefined>>;
+
+      /* EML 이메일 파싱 */
+      parseEml: (filePath: string) => Promise<DsffResult<EmlData>>;
+      extractEmlAttachment: (filePath: string, attachIdx: number) => Promise<DsffResult<{ path: string }>>;
     };
   }
 }

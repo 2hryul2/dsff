@@ -173,6 +173,11 @@ export default function App() {
   /* ── Modal state ── */
   const [modal, setModal] = useState<{ title: string; message: string } | null>(null);
 
+  /* ── EML 더블클릭 시 세부정보 패널 열기 ── */
+  const openEmlInPanel = useCallback(() => {
+    setDetailOpen(true);
+  }, []);
+
   /* ── Zoom state (80~150%, step 10) ── */
   const [zoom, setZoom] = useState(100);
   const handleZoomIn = useCallback(() => setZoom((z) => Math.min(z + 10, 150)), []);
@@ -833,8 +838,8 @@ export default function App() {
           onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
         />
 
-        {/* Main content */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#fff" }}>
+        {/* Main content — 최소 폭 확보하여 세부정보 패널이 커져도 찌그러지지 않도록 */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#fff", minWidth: 320 }}>
           {/* Empty state */}
           {!currentPath && (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "#9ca3af" }}>
@@ -860,6 +865,7 @@ export default function App() {
               onTooltip={(file, x, y) => setTooltip(file ? { file, x, y } : null)}
               onRenameCommit={handleRenameCommit}
               onRenameCancel={() => setRenamingFile(null)}
+              onOpenEml={openEmlInPanel}
             />
           )}
 
@@ -917,7 +923,10 @@ export default function App() {
                           style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
                           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f0f7ff"; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-                          onDoubleClick={() => window.electronAPI?.openPath(f.path)}
+                          onDoubleClick={() => {
+                            if (f.name.toLowerCase().endsWith(".eml")) openEmlInPanel();
+                            else window.electronAPI?.openPath(f.path);
+                          }}
                           onClick={() => {
                             const parentPath = f.path.replace(/[\\/][^\\/]+$/, "");
                             if (parentPath) {
@@ -1117,6 +1126,8 @@ export default function App() {
             } else if (action === "open") {
               if (file.category === "folder") {
                 navigate(file.path);
+              } else if (file.category === "email" && file.name.toLowerCase().endsWith(".eml")) {
+                openEmlInPanel();
               } else {
                 window.electronAPI?.openPath(file.path);
               }

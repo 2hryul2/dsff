@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import type { ActiveView, FileItem, ManagedFolder } from "../types";
 import type { AiStructureNode } from "./views/SmartOrganizeView";
+import EmlViewer from "./EmlViewer";
 
 interface Props {
   file: FileItem | null;
@@ -279,9 +280,16 @@ export default function DetailsPane({
   const inputRef = useRef<HTMLInputElement>(null);
   const [emptyDirScan, setEmptyDirScan] = useState<{ dirs: string[]; scanning: boolean } | null>(null);
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
+  const [detailTab, setDetailTab] = useState<"info" | "email">("info");
 
   const isSmartMode = activeView === "smart" && aiStructure && aiStructure.length > 0;
   const panelWidth = width ?? 220;
+
+  // .eml 파일 선택 시 자동으로 이메일 탭, 그 외는 info 탭으로 전환
+  const isEml = !!(file && file.category === "email" && file.name.toLowerCase().endsWith(".eml"));
+  useEffect(() => {
+    setDetailTab(isEml ? "email" : "info");
+  }, [file?.path, isEml]);
 
   // 리사이즈 핸들러
   function handleResizeStart(e: React.MouseEvent) {
@@ -290,9 +298,10 @@ export default function DetailsPane({
 
     const handleMove = (ev: MouseEvent) => {
       if (!resizeRef.current || !onWidthChange) return;
-      // 좌측으로 드래그하면 폭 증가 (패널이 우측에 있으므로)
       const delta = resizeRef.current.startX - ev.clientX;
-      const newW = Math.max(200, Math.min(500, resizeRef.current.startW + delta));
+      // 파일 목록 최소 320px 확보 → 세부정보 패널 최대 = 전체 폭 - 좌측 패널 - 여유
+      const maxW = Math.min(900, window.innerWidth - 540);
+      const newW = Math.max(200, Math.min(maxW, resizeRef.current.startW + delta));
       onWidthChange(newW);
     };
 
@@ -395,16 +404,44 @@ export default function DetailsPane({
         onMouseLeave={(e) => { if (!resizeRef.current) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
       />
       <div style={{
-        width: panelWidth, flexShrink: 0,
+        width: panelWidth, maxWidth: "calc(100vw - 540px)", flexShrink: 0,
         borderLeft: "1px solid #e4e4e7", background: "#fafafa",
         display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
-        {/* Header */}
-        <div style={{ padding: "8px 12px", borderBottom: "1px solid #e4e4e7", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: isSmartMode ? "#6d28d9" : "#374151" }}>
-            {isSmartMode ? "🤖 AI추천 구조" : "세부 정보"}
-          </span>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af", fontSize: 14 }}>✕</button>
+        {/* Header + 탭 */}
+        <div style={{ borderBottom: "1px solid #e4e4e7", flexShrink: 0 }}>
+          <div style={{ padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: isSmartMode ? "#6d28d9" : "#374151" }}>
+              {isSmartMode ? "🤖 AI추천 구조" : "세부 정보"}
+            </span>
+            <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af", fontSize: 14 }}>✕</button>
+          </div>
+
+          {/* .eml 파일일 때 탭 표시 */}
+          {file && isEml && !isSmartMode && (
+            <div style={{ display: "flex", gap: 0, padding: "0 12px" }}>
+              {([
+                { key: "info" as const, label: "📋 세부 정보" },
+                { key: "email" as const, label: "📧 이메일 뷰어" },
+              ]).map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setDetailTab(t.key)}
+                  style={{
+                    flex: 1, fontSize: 11, padding: "6px 0",
+                    border: "none", borderBottom: detailTab === t.key ? "2px solid #2563eb" : "2px solid transparent",
+                    background: "transparent", cursor: "pointer",
+                    color: detailTab === t.key ? "#2563eb" : "#9ca3af",
+                    fontWeight: detailTab === t.key ? 600 : 400,
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: isSmartMode ? "8px 4px" : "12px" }}>
@@ -429,56 +466,82 @@ export default function DetailsPane({
             </>
           ) : file ? (
             <>
-              {/* File icon + name */}
-              <div style={{ textAlign: "center", marginBottom: 14 }}>
-                <div style={{ fontSize: 40, marginBottom: 6 }}>{file.icon}</div>
-                {renaming ? (
-                  <input
-                    ref={inputRef}
-                    value={renameVal}
-                    onChange={(e) => setRenameVal(e.target.value)}
-                    onBlur={commitRename}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") commitRename();
-                      if (e.key === "Escape") setRenaming(false);
-                    }}
-                    style={{
-                      fontSize: 12, fontWeight: 600, color: "#1a1a1a", wordBreak: "break-all",
-                      lineHeight: 1.4, width: "100%", border: "1px solid #3b82f6",
-                      borderRadius: 4, padding: "2px 4px", outline: "none", textAlign: "center",
-                      boxSizing: "border-box",
-                    }}
-                  />
-                ) : (
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a", wordBreak: "break-all", lineHeight: 1.4 }}>
-                    {file.name}
+              {/* ── 이메일 뷰어 탭 ── */}
+              {isEml && detailTab === "email" ? (
+                <EmlViewer filePath={file.path} />
+              ) : (
+                <>
+                  {/* File icon + name */}
+                  <div style={{ textAlign: "center", marginBottom: 14 }}>
+                    <div style={{ fontSize: 40, marginBottom: 6 }}>{file.icon}</div>
+                    {renaming ? (
+                      <input
+                        ref={inputRef}
+                        value={renameVal}
+                        onChange={(e) => setRenameVal(e.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename();
+                          if (e.key === "Escape") setRenaming(false);
+                        }}
+                        style={{
+                          fontSize: 12, fontWeight: 600, color: "#1a1a1a", wordBreak: "break-all",
+                          lineHeight: 1.4, width: "100%", border: "1px solid #3b82f6",
+                          borderRadius: 4, padding: "2px 4px", outline: "none", textAlign: "center",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a", wordBreak: "break-all", lineHeight: 1.4 }}>
+                        {file.name}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Metadata */}
-              <div style={{ borderTop: "1px solid #e4e4e7", paddingTop: 10 }}>
-                <Row label="형식" value={file.type} />
-                <Row label="크기" value={file.size} />
-                <Row label="수정한 날짜" value={file.modified} />
-                <Row label="만든 날짜" value={file.created} />
-                <Row label="액세스한 날짜" value={file.accessed} />
-                <Row label="분류" value={file.category} />
-              </div>
+                  {/* Metadata */}
+                  <div style={{ borderTop: "1px solid #e4e4e7", paddingTop: 10 }}>
+                    <Row label="형식" value={file.type} />
+                    <Row label="크기" value={file.size} />
+                    <Row label="수정한 날짜" value={file.modified} />
+                    <Row label="만든 날짜" value={file.created} />
+                    <Row label="액세스한 날짜" value={file.accessed} />
+                    <Row label="분류" value={file.category} />
+                  </div>
 
-              {/* Quick actions */}
-              <div style={{ borderTop: "1px solid #e4e4e7", paddingTop: 10, marginTop: 4 }}>
-                <div style={{ fontSize: 10, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>빠른 작업</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <ActionBtn icon="✏️" label="이름 변경" onClick={startRename} />
-                  <ActionBtn icon="📋" label="복사" onClick={handleCopy} />
-                  <ActionBtn icon="🗑️" label="삭제" onClick={handleDelete} />
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                  <ActionBtn icon="🔍" label="중복 검사" onClick={() => onSetView("duplicates")} />
-                  <ActionBtn icon="📊" label="분석" onClick={() => onSetView("analyze")} />
-                </div>
-              </div>
+                  {/* .msg 미지원 안내 */}
+                  {file.category === "email" && file.name.toLowerCase().endsWith(".msg") && (
+                    <div style={{ borderTop: "1px solid #e4e4e7", paddingTop: 10, marginTop: 6 }}>
+                      <div style={{ fontSize: 11, color: "#9ca3af", padding: "8px", background: "#fefce8", border: "1px solid #fde68a", borderRadius: 4, textAlign: "center" }}>
+                        <div style={{ marginBottom: 4 }}>Outlook MSG 형식은 지원되지 않습니다</div>
+                        <button
+                          onClick={() => window.electronAPI?.openPath(file.path)}
+                          style={{
+                            fontSize: 10, padding: "4px 12px", border: "1px solid #d1d5db",
+                            borderRadius: 4, background: "#fff", color: "#2563eb",
+                            cursor: "pointer", fontFamily: "inherit",
+                          }}
+                        >
+                          외부 앱으로 열기
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick actions */}
+                  <div style={{ borderTop: "1px solid #e4e4e7", paddingTop: 10, marginTop: 4 }}>
+                    <div style={{ fontSize: 10, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>빠른 작업</div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <ActionBtn icon="✏️" label="이름 변경" onClick={startRename} />
+                      <ActionBtn icon="📋" label="복사" onClick={handleCopy} />
+                      <ActionBtn icon="🗑️" label="삭제" onClick={handleDelete} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                      <ActionBtn icon="🔍" label="중복 검사" onClick={() => onSetView("duplicates")} />
+                      <ActionBtn icon="📊" label="분석" onClick={() => onSetView("analyze")} />
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           ) : (
             /* No selection: show folder info */
@@ -571,6 +634,7 @@ export default function DetailsPane({
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

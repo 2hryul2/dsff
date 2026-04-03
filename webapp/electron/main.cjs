@@ -3,9 +3,12 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const fs   = require("fs");
+const os   = require("os");
 const { spawn } = require("child_process");
+const { simpleParser } = require("mailparser");
 
 let win;
+let emlTempDir = null; // EML 첨부파일 임시 폴더 (앱 종료 시 삭제)
 
 /* ── Config path (userData/dsff-folders.json) ── */
 const configPath = () => path.join(app.getPath("userData"), "dsff-folders.json");
@@ -651,6 +654,73 @@ ipcMain.handle("fs:writeReferenceFile", async (_e, fileName, folderName, keyword
   }
 });
 
+/* ── EML 파싱: 이메일 헤더 + 본문 + 첨부 메타데이터 반환 ── */
+ipcMain.handle("eml:parse", async (_e, filePath) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    const parsed = await simpleParser(raw);
+
+    const formatAddr = (val) => {
+      if (!val) return "";
+      return val.text || (val.value || []).map((a) =>
+        a.name ? `${a.name} <${a.address}>` : a.address
+      ).join(", ") || "";
+    };
+
+    const attachments = (parsed.attachments || []).map((att, i) => ({
+      filename: att.filename || `첨부파일_${i + 1}`,
+      contentType: att.contentType || "application/octet-stream",
+      size: att.size || 0,
+      index: i,
+    }));
+
+    return {
+      ok: true,
+      data: {
+        from: formatAddr(parsed.from),
+        to: formatAddr(parsed.to),
+        cc: formatAddr(parsed.cc),
+        subject: parsed.subject || "(제목 없음)",
+        date: parsed.date
+          ? new Intl.DateTimeFormat("ko-KR", {
+              year: "numeric", month: "2-digit", day: "2-digit",
+              hour: "2-digit", minute: "2-digit",
+            }).format(parsed.date)
+          : "",
+        textBody: parsed.text || "",
+        htmlBody: parsed.html || "",
+        attachments,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: `이메일 파일을 읽을 수 없습니다: ${err.message}` };
+  }
+});
+
+/* ── EML 첨부파일 추출 → 임시 폴더 → 시스템 기본 앱으로 열기 ── */
+ipcMain.handle("eml:extractAttachment", async (_e, filePath, attachIdx) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    const parsed = await simpleParser(raw);
+    const att = (parsed.attachments || [])[attachIdx];
+    if (!att) return { ok: false, error: "첨부파일을 찾을 수 없습니다" };
+
+    if (!emlTempDir) {
+      emlTempDir = path.join(os.tmpdir(), "dsff-eml-temp");
+      fs.mkdirSync(emlTempDir, { recursive: true });
+    }
+
+    const safeName = (att.filename || `attachment_${attachIdx}`).replace(/[<>:"/\\|?*]/g, "_");
+    const tempPath = path.join(emlTempDir, `${Date.now()}_${safeName}`);
+    fs.writeFileSync(tempPath, att.content);
+
+    shell.openPath(tempPath);
+    return { ok: true, data: { path: tempPath } };
+  } catch (err) {
+    return { ok: false, error: `첨부파일 추출 실패: ${err.message}` };
+  }
+});
+
 /* ── App lifecycle ── */
 app.whenReady().then(createWindow);
 
@@ -663,8 +733,14 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  // Watch 프로세스 정리
   for (const proc of watchProcesses.values()) {
     try { proc.kill(); } catch { /* ignore */ }
   }
   watchProcesses.clear();
+
+  // EML 첨부파일 임시 폴더 삭제
+  if (emlTempDir && fs.existsSync(emlTempDir)) {
+    try { fs.rmSync(emlTempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
 });
